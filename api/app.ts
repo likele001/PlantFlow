@@ -2,6 +2,7 @@
  * This is a API server
  */
 
+import fs from 'node:fs'
 import express, {
   type Request,
   type Response,
@@ -64,23 +65,43 @@ app.use('/api/engine', requireAuth, engineRoutes)
 app.use('/api/health', healthRoutes)
 
 /**
+ * 前端静态资源（Docker 单容器 / 无 Nginx 时也能打开页面）
+ * 编译后 dist 与 dist-api 同级：../dist
+ */
+const distDir = path.resolve(__dirname, '../dist')
+const indexHtml = path.join(distDir, 'index.html')
+
+if (fs.existsSync(indexHtml)) {
+  app.use(express.static(distDir))
+  app.get(/^(?!\/api).*/, (req: Request, res: Response, next: NextFunction) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next()
+    res.sendFile(indexHtml, (err) => {
+      if (err) next(err)
+    })
+  })
+}
+
+/**
  * error handler middleware
  */
-app.use((error: Error, req: Request, res: Response, next: NextFunction) => {
-  res.status(500).json({
-    success: false,
-    error: 'Server internal error',
-  })
+app.use((error: Error, req: Request, res: Response, _next: NextFunction) => {
+  console.error('[api] unhandled error', error)
+  if (req.path.startsWith('/api')) {
+    res.status(500).json({ success: false, error: 'Server internal error' })
+    return
+  }
+  res.status(500).send('Server internal error')
 })
 
 /**
  * 404 handler
  */
 app.use((req: Request, res: Response) => {
-  res.status(404).json({
-    success: false,
-    error: 'API not found',
-  })
+  if (req.path.startsWith('/api')) {
+    res.status(404).json({ success: false, error: 'API not found' })
+    return
+  }
+  res.status(404).send('Not found')
 })
 
 export { initDb }
