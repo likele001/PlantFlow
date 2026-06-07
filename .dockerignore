@@ -1,0 +1,15 @@
+node_modules
+dist
+dist-api
+.git
+.env
+.env.*
+!.env.example
+.trae
+.zip
+*.zip
+.DS_Store
+.vscode
+.idea
+docs/node_modules
+*.log

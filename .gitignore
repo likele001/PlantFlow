@@ -1,0 +1,50 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies & build
+node_modules
+dist
+dist-ssr
+dist-api
+*.local
+
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.vite
+
+# Optional local docs tooling
+docs/node_modules
+
+# IDE / 本地工具（含内部部署笔记，勿提交）
+.trae/
+
+# 宝塔等面板自动生成
+.user.ini
+
+# 压缩包与临时产物
+*.zip
+.zip
+
+# 测试与覆盖率
+coverage
+.nyc_output

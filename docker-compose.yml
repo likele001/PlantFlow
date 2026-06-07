@@ -1,0 +1,19 @@
+services:
+  api:
+    build: .
+    image: workflow-api:latest
+    container_name: workflow-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: ${PORT:-5000}
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+      REDIS_URL: ${REDIS_URL:?Set REDIS_URL in .env}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+      LLM_MASTER_KEY: ${LLM_MASTER_KEY:?Set LLM_MASTER_KEY in .env}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:${PORT:-5000}:${PORT:-5000}"

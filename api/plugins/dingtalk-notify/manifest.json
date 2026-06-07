@@ -1,0 +1,7 @@
+{
+  "type": "integration.dingtalk",
+  "label": "钉钉通知",
+  "group": "集成",
+  "color": "#1677ff",
+  "description": "通过 Webhook 发送钉钉群消息（国产集成示例）"
+}

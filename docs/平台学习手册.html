@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>工厂工作流平台学习手册</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      white-space: pre-wrap;
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    html { -webkit-text-size-adjust: 100%; }
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">工厂工作流平台学习手册</h1>
+</header>
+<h1 id="工厂工作流平台-系统学习手册">工厂工作流平台 · 系统学习手册</h1>
+<p><strong>平台地址：</strong> https://api.cloud.cenkor.cn<br />
+<strong>版本：</strong> 2026-06<br />
+<strong>建议学时：</strong> 2～4 小时（可分天完成）</p>
+<hr />
+<h2 id="目录">目录</h2>
+<ol type="1">
+<li>平台是什么<br />
+</li>
+<li>30 分钟入门<br />
+</li>
+<li>工作流编辑器<br />
+</li>
+<li>知识库（RAG）<br />
+</li>
+<li>对话应用<br />
+</li>
+<li>AI 模型配置<br />
+</li>
+<li>定时与消息推送<br />
+</li>
+<li>渠道与连接器<br />
+</li>
+<li>运维与排错<br />
+</li>
+<li>七天学习路径<br />
+附录：场景配方 · 名词对照</li>
+</ol>
+<hr />
+<h2 id="第一章-平台是什么">第一章 平台是什么</h2>
+<h3 id="一句话定义">1.1 一句话定义</h3>
+<p><strong>工厂工作流平台</strong> = 用可视化流程图编排业务自动化 + AI
+能力，并对外提供对话、API、消息推送等入口。</p>
+<p>可理解为：<strong>n8n（流程编排）+ Dify（AI 应用）</strong>
+的组合，面向工厂/企业内部场景。</p>
+<h3 id="核心概念">1.2 核心概念</h3>
+<table>
+<thead>
+<tr>
+<th>概念</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>工作流</td>
+<td>节点 + 连线的自动化流程</td>
+</tr>
+<tr>
+<td>节点</td>
+<td>做一件具体的事（触发、AI、发消息等）</td>
+</tr>
+<tr>
+<td>触发器</td>
+<td>流程起点（手动、定时、对话、Webhook 等）</td>
+</tr>
+<tr>
+<td>知识库</td>
+<td>上传文档，供 AI 检索引用（RAG）</td>
+</tr>
+<tr>
+<td>对话应用</td>
+<td>把工作流发布成聊天机器人 / API</td>
+</tr>
+<tr>
+<td>执行中心</td>
+<td>查看每次运行的详细日志</td>
+</tr>
+<tr>
+<td>渠道接入</td>
+<td>企业微信、飞书等消息通道</td>
+</tr>
+</tbody>
+</table>
+<h3 id="菜单地图">1.3 菜单地图</h3>
+<ul>
+<li><strong>控制台</strong> — 总览统计<br />
+</li>
+<li><strong>工作流</strong> — 创建、列表、编辑器<br />
+</li>
+<li><strong>执行中心</strong> — 运行记录与节点输出<br />
+</li>
+<li><strong>会话中心</strong> — 对话历史、人工回复<br />
+</li>
+<li><strong>渠道接入</strong> — 企业微信 / 飞书<br />
+</li>
+<li><strong>连接器</strong> — HTTP、数据库等<br />
+</li>
+<li><strong>AI · 知识库</strong> — 文档导入与检索<br />
+</li>
+<li><strong>AI · 模型</strong> — 大模型 / Embedding 配置<br />
+</li>
+<li><strong>AI · 应用</strong> — 对话应用与 API Key<br />
+</li>
+<li><strong>系统管理</strong> — 租户与用户</li>
+</ul>
+<hr />
+<h2 id="第二章-30-分钟入门">第二章 30 分钟入门</h2>
+<h3 id="目标">目标</h3>
+<p>完成：<strong>手动触发 → AI 对话 → 执行中心看到结果</strong></p>
+<h3 id="步骤">步骤</h3>
+<ol type="1">
+<li><strong>工作流</strong> → 点
+<strong>新建</strong>（名称可留空）<br />
+</li>
+<li>编辑器左侧 <strong>模板</strong> → 选 <strong>「AI
+智能问答」</strong><br />
+</li>
+<li>顶栏：<strong>保存</strong> → <strong>发布</strong><br />
+</li>
+<li>顶栏：<strong>运行</strong> → <strong>执行中心</strong>
+查看最新记录</li>
+</ol>
+<h3 id="要点">要点</h3>
+<ul>
+<li>必须 <strong>发布</strong>
+后，外部触发（定时/Webhook/对话）才生效<br />
+</li>
+<li>手动 <strong>运行</strong>
+注入测试数据：<code>content: "手动测试"</code><br />
+</li>
+<li>AI 失败：检查 <strong>AI · 模型</strong> 是否配置</li>
+</ul>
+<h3 id="练习">练习</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" />改
+AI「系统提示」后再运行，对比输出<br />
+</label></li>
+<li><label><input type="checkbox" />在执行中心找到 AI 节点的
+<code>text</code> 字段</label></li>
+</ul>
+<hr />
+<h2 id="第三章-工作流编辑器">第三章 工作流编辑器</h2>
+<h3 id="界面">界面</h3>
+<pre><code>节点库（左） | 画布（中） | 配置面板（右）
+顶栏：保存 | 发布 | 运行 | 自动排列</code></pre>
+<h3 id="基本操作">基本操作</h3>
+<table>
+<thead>
+<tr>
+<th>操作</th>
+<th>方法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>加节点</td>
+<td>左侧拖拽或点击</td>
+</tr>
+<tr>
+<td>连线</td>
+<td>右侧圆点拖到下一节点</td>
+</tr>
+<tr>
+<td>配参数</td>
+<td>点节点 → 右侧面板</td>
+</tr>
+<tr>
+<td>插变量</td>
+<td>变量选择器点击插入</td>
+</tr>
+<tr>
+<td>IF 分支</td>
+<td>绿=是，红=否</td>
+</tr>
+</tbody>
+</table>
+<h3 id="变量语法">变量语法</h3>
+<table>
+<thead>
+<tr>
+<th>写法</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{{trigger.content}}</code></td>
+<td>触发带来的主要内容</td>
+</tr>
+<tr>
+<td><code>{{steps.__last__.text}}</code></td>
+<td>上一步 AI 文本输出</td>
+</tr>
+<tr>
+<td><code>{{steps.__last__.chunks}}</code></td>
+<td>上一步知识库检索结果</td>
+</tr>
+<tr>
+<td><code>{{steps.节点ID.字段}}</code></td>
+<td>指定节点输出</td>
+</tr>
+<tr>
+<td><code>{{trigger.firedAt}}</code></td>
+<td>定时触发时间</td>
+</tr>
+</tbody>
+</table>
+<h3 id="节点速查">节点速查</h3>
+<p><strong>触发器：</strong> 手动、对话、Webhook、定时、企微、飞书</p>
+<p><strong>逻辑：</strong>
+IF、Switch、设置变量、延迟、并行、汇合、子工作流</p>
+<p><strong>AI：</strong> AI 对话、知识库检索、AI Agent</p>
+<p><strong>集成：</strong> HTTP 请求、消息推送</p>
+<hr />
+<h2 id="第四章-知识库rag">第四章 知识库（RAG）</h2>
+<h3 id="流程">流程</h3>
+<ol type="1">
+<li>左侧 <strong>创建知识库</strong> →
+<strong>选中</strong>（高亮）<br />
+</li>
+<li><strong>上传</strong> .txt / .md / .csv 或
+<strong>粘贴导入</strong><br />
+</li>
+<li><strong>检索评测</strong>：先用 <strong>关键词</strong>（向量需
+Embedding）<br />
+</li>
+<li>工作流：<strong>知识库检索 → AI 对话</strong></li>
+</ol>
+<h3 id="rag-标准结构">RAG 标准结构</h3>
+<pre><code>触发 → 知识库检索 → AI 对话（引用 {{steps.__last__.chunks}}）</code></pre>
+<h3 id="检索模式">检索模式</h3>
+<table>
+<thead>
+<tr>
+<th>模式</th>
+<th>前提</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>关键词</td>
+<td>无需 Embedding，立即可用</td>
+</tr>
+<tr>
+<td>向量</td>
+<td>需 Embedding 模型 + 重向量化</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="第五章-对话应用">第五章 对话应用</h2>
+<h3 id="是什么">是什么</h3>
+<p>把工作流包装成 <strong>聊天产品</strong>（网页 + API +
+会话记录）。</p>
+<h3 id="发布步骤">发布步骤</h3>
+<ol type="1">
+<li>工作流含 <strong>对话触发</strong> + AI（推荐：对话 → 知识库 →
+AI）<br />
+</li>
+<li>工作流 <strong>保存 → 发布</strong><br />
+</li>
+<li><strong>AI · 应用</strong> → 新建 → 选工作流 →
+<strong>发布</strong><br />
+</li>
+<li>复制：聊天链接 / API Key / 嵌入代码</li>
+</ol>
+<h3 id="学习示例已创建">学习示例（已创建）</h3>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>项目</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>工作流</td>
+<td>学习示例：知识库智能客服</td>
+</tr>
+<tr>
+<td>聊天页</td>
+<td>https://api.cloud.cenkor.cn/chat/app_a01ad102443849fa888a6836038cfb79</td>
+</tr>
+<tr>
+<td>API Key</td>
+<td>app_a01ad102443849fa888a6836038cfb79</td>
+</tr>
+</tbody>
+</table>
+<p><strong>API 示例：</strong></p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="ex">curl</span> https://api.cloud.cenkor.cn/api/v1/chat/completions <span class="dt">\</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Authorization: Bearer app_a01ad102443849fa888a6836038cfb79&quot;</span> <span class="dt">\</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">-H</span> <span class="st">&quot;Content-Type: application/json&quot;</span> <span class="dt">\</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">-d</span> <span class="st">&#39;{&quot;messages&quot;:[{&quot;role&quot;:&quot;user&quot;,&quot;content&quot;:&quot;你好&quot;}]}&#39;</span></span></code></pre></div>
+<hr />
+<h2 id="第六章-ai-模型配置">第六章 AI 模型配置</h2>
+<h3 id="两个接口">两个接口</h3>
+<table>
+<thead>
+<tr>
+<th>用途</th>
+<th>字段</th>
+<th>接口</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>对话</td>
+<td>默认 Chat 模型</td>
+<td><code>/chat/completions</code></td>
+</tr>
+<tr>
+<td>向量</td>
+<td>默认 Embedding 模型</td>
+<td><code>/embeddings</code></td>
+</tr>
+</tbody>
+</table>
+<p>Chat 能通 ≠ 向量能用。自建网关若无
+<code>/embeddings</code>，知识库请用 <strong>关键词检索</strong>。</p>
+<h3 id="配置路径">配置路径</h3>
+<p><strong>AI · 模型</strong> → 填 Base URL、API Key、Chat
+模型、Embedding 模型 → 设为默认 → 保存</p>
+<p>向量化：知识库文档点 <strong>重向量化</strong>，左侧显示「X
+已向量化」。</p>
+<hr />
+<h2 id="第七章-定时与消息推送">第七章 定时与消息推送</h2>
+<h3 id="每日飞书日报">每日飞书日报</h3>
+<pre><code>定时(0 9 * * *) → HTTP拉数据 → AI汇总 → 飞书推送(chat_id)</code></pre>
+<p>模板：<strong>每日飞书日报</strong>。需 <strong>渠道接入</strong>
+配置飞书。</p>
+<h3 id="webhook-告警">Webhook 告警</h3>
+<pre><code>Webhook → IF(含告警) → 消息推送</code></pre>
+<p>模板：<strong>Webhook 告警</strong>。</p>
+<hr />
+<h2 id="第八章-渠道与连接器">第八章 渠道与连接器</h2>
+<ul>
+<li><strong>渠道接入</strong>：企微/飞书
+AppId、Secret、回调地址、测试发送<br />
+</li>
+<li><strong>连接器</strong>：HTTP 鉴权复用，供 HTTP 请求节点选择</li>
+</ul>
+<hr />
+<h2 id="第九章-运维与排错">第九章 运维与排错</h2>
+<table>
+<thead>
+<tr>
+<th>现象</th>
+<th>处理</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>向量检索无结果</td>
+<td>用关键词；配 Embedding 后重向量化</td>
+</tr>
+<tr>
+<td>对话无回复</td>
+<td>看执行中心；确认工作流已发布</td>
+</tr>
+<tr>
+<td>定时没触发</td>
+<td>工作流必须发布</td>
+</tr>
+<tr>
+<td>飞书发不出</td>
+<td>渠道配置 + chat_id</td>
+</tr>
+<tr>
+<td>AI 报错</td>
+<td>检查 AI 模型 Key/地址</td>
+</tr>
+</tbody>
+</table>
+<p><strong>发布 Checklist：</strong> 保存 → 发布工作流 → 模型可用 →
+知识库已导入 → 应用已发布</p>
+<hr />
+<h2 id="第十章-七天学习路径">第十章 七天学习路径</h2>
+<table>
+<thead>
+<tr>
+<th>天</th>
+<th>任务</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Day 1</td>
+<td>AI 智能问答模板 + 执行中心</td>
+</tr>
+<tr>
+<td>Day 2</td>
+<td>知识库导入 + RAG 模板</td>
+</tr>
+<tr>
+<td>Day 3</td>
+<td>学习示例客服 + API + Inbox</td>
+</tr>
+<tr>
+<td>Day 4</td>
+<td>IF / Switch 分支</td>
+</tr>
+<tr>
+<td>Day 5</td>
+<td>HTTP + 连接器</td>
+</tr>
+<tr>
+<td>Day 6</td>
+<td>定时 / Webhook / 飞书</td>
+</tr>
+<tr>
+<td>Day 7</td>
+<td>从零设计一条业务流</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="附录-a-场景配方">附录 A 场景配方</h2>
+<p><strong>员工问答：</strong> 对话触发 → 知识库 → AI → 发布应用</p>
+<p><strong>异常告警：</strong> Webhook → IF → 飞书推送</p>
+<p><strong>运营日报：</strong> 定时 9:00 → HTTP → AI → 飞书</p>
+<p><strong>报工分流：</strong> 飞书触发 → Switch → 多分支</p>
+<hr />
+<h2 id="附录-b-名词对照">附录 B 名词对照</h2>
+<table>
+<thead>
+<tr>
+<th>用语</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>发布</td>
+<td>上线，外部触发生效</td>
+</tr>
+<tr>
+<td>草稿</td>
+<td>仅编辑和手动测试</td>
+</tr>
+<tr>
+<td>分段</td>
+<td>长文档切成小块</td>
+</tr>
+<tr>
+<td>向量化</td>
+<td>文字变向量，供语义检索</td>
+</tr>
+<tr>
+<td>RAG</td>
+<td>先搜文档再让 AI 回答</td>
+</tr>
+<tr>
+<td>API Key</td>
+<td>对话应用对外密钥</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<p><em>工厂工作流平台 · 内部学习资料</em></p>
+</body>
+</html>
