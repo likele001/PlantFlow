@@ -68,6 +68,73 @@ docker compose up -d
 
 访问：`http://127.0.0.1:5000`（或你反向代理的域名）
 
+### 3.1 反向代理（Nginx / 宝塔）
+
+后端 Express 已同时托管 API (`/api/*`) 与编译后的前端 (`dist/`)，所以**最简单的部署是：把域名全部反代到 `127.0.0.1:5000`**，无需伪静态、无需绑目录。
+
+#### 方案 A：纯反代（推荐）
+
+宝塔面板 → 网站 → `你的域名` → 配置文件，替换为：
+
+```nginx
+server {
+    listen 80;
+    server_name api.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+}
+```
+
+> 若已签发 SSL，把 `listen 80` 换成宝塔生成的 443 块，并在 `location /` 之前保留宝塔自动生成的 SSL 配置即可。
+
+#### 方案 B：网站根目录绑 `dist/` + `/api` 反代
+
+适合想直接由 Nginx 服务静态资源、把 API 单独反代的场景。
+
+1. 宝塔面板 → 网站 → 添加站点 → 网站根目录指向 `dist/`（Docker 容器内为 `/app/dist`，宿主机部署则为 `<项目目录>/dist`）。
+2. 配置文件加入伪静态（前端 SPA fallback）和 `/api` 反代：
+
+```nginx
+server {
+    listen 80;
+    server_name api.example.com;
+    root /www/wwwroot/api/dist;        # 改成你的 dist 实际路径
+    index index.html;
+
+    # 前端路由 fallback（伪静态）
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 后端 API 反代
+    location /api/ {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+}
+```
+
+#### 反代后健康检查
+
+```bash
+curl -s https://api.example.com/api/health
+```
+
+返回 `{"ok":true,...}` 即正常。
+
 ### 4. 本地开发
 
 ```bash

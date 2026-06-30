@@ -1,6 +1,8 @@
 import { db } from '../store.js'
 import { runWorkflow } from './executor.js'
 
+const MAX_HISTORY = 20
+
 export async function runChatAppMessage(input: {
   tenantId: string
   appId?: string
@@ -10,6 +12,8 @@ export async function runChatAppMessage(input: {
   sessionId?: string
 }): Promise<{ reply: string; executionId: string; chatSessionId?: string }> {
   let chatSessionId: string | undefined
+  let chatHistory: { role: string; content: string }[] = []
+
   if (input.appId) {
     const session = await db.getOrCreateChatSession({
       tenantId: input.tenantId,
@@ -18,6 +22,12 @@ export async function runChatAppMessage(input: {
     })
     chatSessionId = session.id
     await db.insertChatMessage({ sessionId: session.id, role: 'user', content: input.message })
+
+    const msgs = await db.listChatMessages(session.id)
+    chatHistory = msgs
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .slice(-MAX_HISTORY)
+      .map((m) => ({ role: m.role, content: m.content }))
   }
 
   const result = await runWorkflow({
@@ -30,6 +40,7 @@ export async function runChatAppMessage(input: {
       sessionId: input.sessionId ?? crypto.randomUUID(),
       userId: input.userId ?? 'anonymous',
       channel: 'chat',
+      chatHistory,
     },
     userId: input.userId,
   })

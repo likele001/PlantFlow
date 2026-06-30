@@ -35,6 +35,7 @@ router.post('/providers', async (req: AuthedRequest, res: Response) => {
     defaultChatModel?: string
     defaultEmbeddingModel?: string | null
     isDefault?: boolean
+    isDefaultEmbedding?: boolean
   }
   const name = String(body.name ?? '').trim()
   const baseUrl = String(body.baseUrl ?? '').trim().replace(/\/+$/, '')
@@ -67,11 +68,16 @@ router.post('/providers', async (req: AuthedRequest, res: Response) => {
     defaultChatModel,
     defaultEmbeddingModel,
     isDefault: !!body.isDefault,
+    isDefaultEmbedding: !!body.isDefaultEmbedding,
   })
 
   if (body.isDefault) {
-    // The insert above set is_default=true; enforce uniqueness by re-running.
     await db.setDefaultProvider(tenantId, provider.id)
+  }
+  if (body.isDefaultEmbedding) {
+    await db.setDefaultEmbeddingProvider(tenantId, provider.id)
+  }
+  if (body.isDefault || body.isDefaultEmbedding) {
     const refreshed = await db.findProvider(tenantId, provider.id)
     res.status(201).json({ success: true, data: refreshed })
     return
@@ -89,6 +95,7 @@ router.patch('/providers/:id', async (req: AuthedRequest, res: Response) => {
     apiKey?: string
     defaultChatModel?: string
     defaultEmbeddingModel?: string | null
+    isDefaultEmbedding?: boolean
   }
 
   const patch: Parameters<typeof db.updateProvider>[0] = { tenantId, id }
@@ -112,11 +119,17 @@ router.patch('/providers/:id', async (req: AuthedRequest, res: Response) => {
     patch.apiKey = String(body.apiKey)
     patch.apiKeyMasked = maskSecret(String(body.apiKey))
   }
+  if (body.isDefaultEmbedding !== undefined) {
+    patch.isDefaultEmbedding = body.isDefaultEmbedding
+  }
 
   const updated = await db.updateProvider(patch)
   if (!updated) {
     bad(res, 'Provider not found', 404)
     return
+  }
+  if (body.isDefaultEmbedding) {
+    await db.setDefaultEmbeddingProvider(tenantId, id)
   }
   res.json({ success: true, data: updated })
 })
@@ -193,6 +206,17 @@ router.post('/providers/:id/test', async (req: AuthedRequest, res: Response) => 
       error: e instanceof Error ? e.message : String(e),
     })
   }
+})
+
+router.post('/providers/:id/default-embedding', async (req: AuthedRequest, res: Response) => {
+  const tenantId = req.auth!.tenantId
+  const p = await db.findProvider(tenantId, req.params.id)
+  if (!p) {
+    res.status(404).json({ success: false, error: 'Not found' })
+    return
+  }
+  await db.setDefaultEmbeddingProvider(tenantId, req.params.id)
+  res.json({ success: true })
 })
 
 export default router

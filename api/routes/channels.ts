@@ -1,6 +1,7 @@
 import crypto from 'crypto'
 import express, { Router, type Request, type Response } from 'express'
 import { db, type FeishuChannelConfig, type WecomChannelConfig } from '../store.js'
+import { handleBotMessage } from './bot-engine.js'
 import { requireAuth, type AuthedRequest } from '../middleware/auth.js'
 
 type WecomIncoming = {
@@ -73,7 +74,7 @@ function xmlTag(xml: string, tag: string) {
   return (m?.[1] ?? m?.[2] ?? '').trim()
 }
 
-async function getWecomAccessToken(tenantId: string, cfg: WecomChannelConfig) {
+export async function getWecomAccessToken(tenantId: string, cfg: WecomChannelConfig) {
   const cached = db.wecomAccessTokenCache.get(tenantId)
   if (cached && cached.expiresAt > Date.now() + 30_000) return cached.token
 
@@ -88,7 +89,7 @@ async function getWecomAccessToken(tenantId: string, cfg: WecomChannelConfig) {
   return data.access_token
 }
 
-async function getFeishuTenantToken(tenantId: string, cfg: FeishuChannelConfig) {
+export async function getFeishuTenantToken(tenantId: string, cfg: FeishuChannelConfig) {
   const cached = db.feishuTenantTokenCache.get(tenantId)
   if (cached && cached.expiresAt > Date.now() + 30_000) return cached.token
 
@@ -254,11 +255,9 @@ router.get('/wecom/webhook/:tenantId', async (req: Request, res: Response): Prom
   }
 
   const decrypted = wecomDecrypt(cfg.encodingAESKey, echostr)
-  const replyEncrypt = wecomEncrypt(cfg.encodingAESKey, decrypted.corpId, decrypted.xml)
-  const replySignature = wecomSignature(cfg.token, timestamp, nonce, replyEncrypt)
-  res.status(200).send(`<xml><Encrypt><![CDATA[${replyEncrypt}]]></Encrypt><MsgSignature><![CDATA[${replySignature}]]></MsgSignature><TimeStamp>${timestamp}</TimeStamp><Nonce><![CDATA[${nonce}]]></Nonce></xml>`)
-})
+  res.status(200).send(decrypted.xml)
 
+})
 router.post('/wecom/webhook/:tenantId', express.text({ type: '*/*' }), async (req: Request, res: Response): Promise<void> => {
   const tenantId = String(req.params.tenantId ?? '').trim()
   const cfg = (await db.getChannelConfig(tenantId))?.wecom
@@ -307,6 +306,9 @@ router.post('/wecom/webhook/:tenantId', express.text({ type: '*/*' }), async (re
 
   const conv = await db.upsertConversation(tenantId, 'wecom', normalized.conversationExternalId, normalized.kind, title)
   await db.insertMessage(tenantId, conv.id, 'in', normalized.fromId, normalized.content, normalized.raw)
+
+  // Bot 对话引擎处理
+  void handleBotMessage(tenantId, 'wecom', fromUser || normalized.fromId, content || '').catch((e) => console.error('[bot] wecom error', e))
 
   const { triggerMatchingWorkflows } = await import('../engine/executor.js')
   void triggerMatchingWorkflows(tenantId, 'trigger.wecom', {
@@ -368,6 +370,9 @@ router.post('/feishu/webhook/:tenantId', async (req: Request, res: Response): Pr
     const title = kind === 'direct' ? `飞书私聊(${chatId})` : `飞书群(${chatId})`
     const conv = await db.upsertConversation(tenantId, 'feishu', conversationExternalId, kind, title)
     await db.insertMessage(tenantId, conv.id, 'in', fromId || 'unknown', contentText || '[message]', body)
+
+    // Bot 对话引擎处理
+    void handleBotMessage(tenantId, 'feishu', fromId || 'unknown', contentText || '').catch((e) => console.error('[bot] feishu error', e))
 
     const { triggerMatchingWorkflows } = await import('../engine/executor.js')
     void triggerMatchingWorkflows(tenantId, 'trigger.feishu', {

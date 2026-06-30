@@ -17,16 +17,21 @@ import tenantRoutes from './routes/tenants.js'
 import workflowRoutes from './routes/workflows.js'
 import conversationRoutes from './routes/conversations.js'
 import channelRoutes from './routes/channels.js'
+import taobaoRoutes from './routes/taobao.js'
+import storeProfileRoutes from './routes/store-profile.js'
+import botWizardRoutes from './routes/bot-wizard.js'
 import aiRoutes from './routes/ai.js'
 import executionRoutes from './routes/executions.js'
 import knowledgeRoutes from './routes/knowledge.js'
 import connectorRoutes from './routes/connectors.js'
 import dashboardRoutes from './routes/dashboard.js'
+import credentialRoutes from './routes/credentials.js'
 import adminRoutes from './routes/admin.js'
 import hooksRoutes from './routes/hooks.js'
 import appsRoutes from './routes/apps.js'
 import chatApiRoutes from './routes/chat-api.js'
 import healthRoutes from './routes/health.js'
+import botRoutes from './routes/bot.js'
 import engineRoutes from './routes/engine.js'
 import { requireAuth } from './middleware/auth.js'
 import { initDb } from './db.js'
@@ -55,14 +60,19 @@ app.use('/api/tenants', requireAuth, tenantRoutes)
 app.use('/api/workflows', requireAuth, workflowRoutes)
 app.use('/api/conversations', requireAuth, conversationRoutes)
 app.use('/api/channels', channelRoutes)
+app.use('/api/channels', taobaoRoutes)
+app.use('/api', requireAuth, storeProfileRoutes)
+app.use('/api/bot-wizard', requireAuth, botWizardRoutes)
 app.use('/api/ai', aiRoutes)
 app.use('/api/executions', requireAuth, executionRoutes)
 app.use('/api/knowledge', requireAuth, knowledgeRoutes)
 app.use('/api/connectors', requireAuth, connectorRoutes)
 app.use('/api/dashboard', requireAuth, dashboardRoutes)
+app.use('/api/credentials', credentialRoutes)
 app.use('/api/admin', requireAuth, adminRoutes)
 app.use('/api/engine', requireAuth, engineRoutes)
 app.use('/api/health', healthRoutes)
+app.use('/api/bot', botRoutes)
 
 /**
  * 前端静态资源（Docker 单容器 / 无 Nginx 时也能打开页面）

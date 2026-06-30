@@ -1,29 +1,31 @@
-export type WorkflowNode = {
-  id: string
-  type: string
-  label: string
-  config: Record<string, unknown>
-  position?: { x: number; y: number }
-}
+// engine/types.ts
 
-export type WorkflowEdge = {
-  id: string
-  source: string
-  target: string
-  /** logic.if: 'true' | 'false'; default handle omitted */
-  sourceHandle?: string
-}
-
-export type WorkflowDefinition = {
+export interface WorkflowDefinition {
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
 }
 
-export type ExecutionStatus = 'running' | 'success' | 'failed' | 'cancelled'
-export type StepStatus = 'running' | 'success' | 'failed' | 'skipped'
+export interface WorkflowNode {
+  id: string
+  type: string
+  label?: string
+  config?: Record<string, unknown>
+  position?: { x: number; y: number }
+}
 
-export type RunContext = {
+export interface WorkflowEdge {
+  id: string
+  source: string
+  target: string
+  sourceHandle?: string
+  label?: string
+}
+
+export interface RunContext {
   trigger: Record<string, unknown>
   steps: Record<string, unknown>
   vars: Record<string, unknown>
+  loopIndex: number
+  loopItem: unknown
+  store?: Record<string, unknown>
 }

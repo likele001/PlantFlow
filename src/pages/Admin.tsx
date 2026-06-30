@@ -226,8 +226,68 @@ export default function Admin() {
               ) : null}
             </div>
           </div>
+
+          {/* Tenant Management */}
+          <div className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
+            <div className="text-sm font-semibold">客户租户管理</div>
+            <div className="mt-2 text-xs text-zinc-500">为客户创建独立租户，数据完全隔离</div>
+            <TenantManager token={token!} />
+          </div>
         </>
       )}
+    </div>
+  )
+}
+
+function TenantManager({ token }: { token: string }) {
+  const [tenants, setTenants] = useState<{ id: string; name: string; createdAt: string }[]>([])
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  async function load() {
+    const res = await apiRequest<{ id: string; name: string; createdAt: string }[]>('/api/tenants', { token })
+    if ('data' in res) setTenants(res.data)
+  }
+  useEffect(() => { void load() }, [token])
+
+  async function createTenant() {
+    if (!name.trim() || !email.trim() || !password) return
+    setLoading(true)
+    const res = await fetch('/api/tenants', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ name: name.trim(), adminEmail: email.trim(), adminPassword: password }),
+    })
+    const data = await res.json()
+    setLoading(false)
+    if (data.success) {
+      setMsg(`已创建「${name}」，客户可用 ${email} 登录`)
+      setName(''); setEmail(''); setPassword('')
+      await load()
+    } else setMsg(data.error || '创建失败')
+  }
+
+  return (
+    <div className="mt-4 space-y-4">
+      <div className="flex gap-2">
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="公司名称" className="h-9 flex-1 rounded-lg border px-2 text-sm dark:border-zinc-800 dark:bg-zinc-950" />
+        <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="管理员邮箱" className="h-9 w-48 rounded-lg border px-2 text-sm dark:border-zinc-800 dark:bg-zinc-950" />
+        <input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="密码" type="password" className="h-9 w-32 rounded-lg border px-2 text-sm dark:border-zinc-800 dark:bg-zinc-950" />
+        <button onClick={createTenant} disabled={loading} className="h-9 rounded-lg bg-zinc-900 px-4 text-sm text-white dark:bg-zinc-100 dark:text-zinc-900">{loading ? '创建中' : '创建'}</button>
+      </div>
+      {msg ? <div className="text-xs text-emerald-600 dark:text-emerald-400">{msg}</div> : null}
+      <div className="text-xs text-zinc-500">已有 {tenants.length} 个租户</div>
+      <div className="max-h-40 space-y-1 overflow-y-auto">
+        {tenants.slice(0, 10).map((t) => (
+          <div key={t.id} className="flex justify-between rounded-lg border px-3 py-1.5 text-xs dark:border-zinc-800">
+            <span>{t.name}</span>
+            <span className="text-zinc-400">{new Date(t.createdAt).toLocaleDateString()}</span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

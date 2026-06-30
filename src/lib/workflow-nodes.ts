@@ -41,6 +41,12 @@ export const NODE_PALETTE: NodePaletteItem[] = [
   { type: 'logic.set', label: '设置变量', group: '逻辑', color: '#eab308' },
   { type: 'trigger.chat', label: '对话触发', group: '触发器', color: '#c084fc' },
   { type: 'logic.delay', label: '延迟', group: '逻辑', color: '#94a3b8' },
+  { type: 'logic.code', label: 'Code', group: '逻辑', color: '#8b5cf6' },
+  { type: 'logic.try', label: 'Try/Catch', group: '逻辑', color: '#f97316', outputs: 'branch' },
+  { type: 'logic.json.parse', label: 'JSON 解析', group: '逻辑', color: '#22d3ee' },
+  { type: 'logic.split', label: '拆分', group: '逻辑', color: '#a78bfa' },
+  { type: 'logic.join', label: '合并文本', group: '逻辑', color: '#c084fc' },
+  { type: 'logic.date', label: '日期处理', group: '逻辑', color: '#fbbf24' },
   { type: 'ai.chat', label: 'AI 对话', group: 'AI', color: '#ec4899' },
   { type: 'ai.knowledge', label: '知识库检索', group: 'AI', color: '#f472b6' },
   { type: 'ai.agent', label: 'AI Agent', group: 'AI', color: '#db2777' },
@@ -76,6 +82,18 @@ export function defaultNodeConfig(type: string): Record<string, unknown> {
       return { variables: { reply: '{{steps.__last__.text}}' } }
     case 'logic.delay':
       return { ms: 300 }
+    case 'logic.code':
+      return { code: 'const result = $.trigger.content\nreturn result', timeout: 5000 }
+    case 'logic.try':
+      return {}
+    case 'logic.json.parse':
+      return { input: '{{trigger.content}}' }
+    case 'logic.split':
+      return { input: '{{trigger.content}}', separator: ',' }
+    case 'logic.join':
+      return { items: '{{steps.__last__.items}}', separator: '\n' }
+    case 'logic.date':
+      return { value: 'now', format: 'YYYY-MM-DD HH:mm:ss', offsetDays: 0 }
     case 'ai.chat':
       return { systemPrompt: '你是高效简洁的中文工厂智能助手。', userPrompt: '{{trigger.content}}' }
     case 'ai.knowledge':

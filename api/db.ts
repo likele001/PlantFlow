@@ -28,6 +28,11 @@ export async function initDb(): Promise<void> {
     '005_versions_apps.sql',
     '006_subworkflow.sql',
     '007_chat_sessions.sql',
+    '008_taobao_channel.sql',
+    '009_store_profiles.sql',
+    '010_credentials.sql',
+    '012_embedding_provider.sql',
+    '013_bot_assistant.sql',
   ]
   for (const file of migrations) {
     const sqlPath = path.join(__dirname, 'migrations', file)
@@ -55,7 +60,7 @@ async function seed(): Promise<void> {
     const tenantId = tenantRes.rows[0].id
 
     const userRes = await client.query<{ id: string }>(
-      `INSERT INTO users (email, password) VALUES ('admin@example.com', 'admin123') RETURNING id`,
+      `INSERT INTO users (email, password) VALUES ('admin@example.com', $1) RETURNING id`, ['$2b$10$4qNyylaauu.kBKXY9ygEMuY4suLV6HPW.PFKgQSQ0QDaVwtkRXEny'] as any,
     )
     const userId = userRes.rows[0].id
 

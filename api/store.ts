@@ -16,6 +16,14 @@ export type Tenant = {
   createdAt: string
 }
 
+export type TaobaoChannelConfig = {
+  appKey: string
+  appSecret: string
+  session: string
+  sellerNick: string
+  tmcGroup: string
+}
+
 export type User = {
   id: Id
   email: string
@@ -178,6 +186,26 @@ export type ChannelConfig = {
   feishu?: FeishuChannelConfig
 }
 
+export type Credential = {
+  id: Id
+  tenantId: Id
+  name: string
+  type: 'api_key' | 'oauth2' | 'basic_auth' | 'bearer_token' | 'custom'
+  data: Record<string, unknown>
+  maskedPreview: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type OAuthState = {
+  id: Id
+  credentialId: Id
+  state: string
+  redirectUri: string
+  extra: Record<string, unknown>
+  expiresAt: string
+}
+
 type TokenSession = {
   token: string
   userId: Id
@@ -210,6 +238,7 @@ export type LlmProvider = {
   defaultChatModel: string
   defaultEmbeddingModel: string | null
   isDefault: boolean
+  isDefaultEmbedding: boolean
   createdAt: string
   updatedAt: string
 }
@@ -225,12 +254,13 @@ const PROVIDER_COLS = `
   default_chat_model AS "defaultChatModel",
   default_embedding_model AS "defaultEmbeddingModel",
   is_default AS "isDefault",
+  is_default_embedding AS "isDefaultEmbedding",
   created_at AS "createdAt", updated_at AS "updatedAt"
 `
 
 export async function listProviders(tenantId: Id): Promise<LlmProvider[]> {
   const { rows } = await pool.query<LlmProvider>(
-    `SELECT ${PROVIDER_COLS} FROM llm_providers WHERE tenant_id = $1 ORDER BY is_default DESC, created_at ASC`,
+    `SELECT ${PROVIDER_COLS} FROM llm_providers WHERE tenant_id = $1 ORDER BY is_default DESC, is_default_embedding DESC, created_at ASC`,
     [tenantId],
   )
   return rows
@@ -283,14 +313,15 @@ export async function insertProvider(input: {
   defaultChatModel: string
   defaultEmbeddingModel: string | null
   isDefault: boolean
+  isDefaultEmbedding?: boolean
 }): Promise<LlmProvider> {
   const { encryptSecret } = await import('./crypto.js')
   const enc = encryptSecret(input.apiKey)
   const { rows } = await pool.query<LlmProvider>(
     `INSERT INTO llm_providers
        (tenant_id, name, base_url, api_key_iv, api_key_tag, api_key_ciphertext,
-        api_key_masked, default_chat_model, default_embedding_model, is_default)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        api_key_masked, default_chat_model, default_embedding_model, is_default, is_default_embedding)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      RETURNING ${PROVIDER_COLS}`,
     [
       input.tenantId,
@@ -303,6 +334,7 @@ export async function insertProvider(input: {
       input.defaultChatModel,
       input.defaultEmbeddingModel,
       input.isDefault,
+      input.isDefaultEmbedding ?? false,
     ],
   )
   return rows[0]
@@ -317,6 +349,8 @@ export async function updateProvider(input: {
   apiKeyMasked?: string
   defaultChatModel?: string
   defaultEmbeddingModel?: string | null
+  isDefault?: boolean
+  isDefaultEmbedding?: boolean
 }): Promise<LlmProvider | null> {
   const sets: string[] = []
   const vals: unknown[] = []
@@ -329,6 +363,7 @@ export async function updateProvider(input: {
   if (input.baseUrl !== undefined) push('base_url', input.baseUrl)
   if (input.defaultChatModel !== undefined) push('default_chat_model', input.defaultChatModel)
   if (input.defaultEmbeddingModel !== undefined) push('default_embedding_model', input.defaultEmbeddingModel)
+  if (input.isDefaultEmbedding !== undefined) push('is_default_embedding', input.isDefaultEmbedding)
   if (input.apiKey !== undefined) {
     const { encryptSecret } = await import('./crypto.js')
     const enc = encryptSecret(input.apiKey)
@@ -383,7 +418,26 @@ export async function setDefaultProvider(tenantId: Id, id: Id): Promise<void> {
   }
 }
 
-
+export async function setDefaultEmbeddingProvider(tenantId: Id, id: Id): Promise<void> {
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query(
+      `UPDATE llm_providers SET is_default_embedding = false, updated_at = now() WHERE tenant_id = $1`,
+      [tenantId],
+    )
+    await client.query(
+      `UPDATE llm_providers SET is_default_embedding = true, updated_at = now() WHERE tenant_id = $1 AND id = $2`,
+      [tenantId, id],
+    )
+    await client.query('COMMIT')
+  } catch (e) {
+    await client.query('ROLLBACK')
+    throw e
+  } finally {
+    client.release()
+  }
+}
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10)
@@ -422,7 +476,31 @@ export async function findUserById(id: Id): Promise<User | null> {
   return rows[0] ?? null
 }
 
+export async function findUserByEmail(email: string): Promise<User | null> {
+  const { rows } = await pool.query<User>(
+    `SELECT id, email, password, created_at AS "createdAt" FROM users WHERE lower(email) = lower($1)`,
+    [email],
+  )
+  return rows[0] ?? null
+}
+
+export async function createUser(email: string, hashedPassword: string): Promise<User> {
+  const { rows } = await pool.query<User>(
+    `INSERT INTO users (email, password) VALUES ($1, $2) RETURNING id, email, password, created_at AS "createdAt"`,
+    [email.toLowerCase(), hashedPassword],
+  )
+  return rows[0]
+}
+
 /* ---------- tenants ---------- */
+
+export async function createTenant(name: string): Promise<Tenant> {
+  const { rows } = await pool.query<Tenant>(
+    `INSERT INTO tenants (name) VALUES ($1) RETURNING id, name, created_at AS "createdAt"`,
+    [name],
+  )
+  return rows[0]
+}
 
 export async function listTenantsForUser(userId: Id): Promise<Tenant[]> {
   const { rows } = await pool.query<Tenant>(
@@ -456,6 +534,17 @@ export async function findFirstMembershipForUser(
   return rows[0] ?? null
 }
 
+export async function createMembership(input: {
+  tenantId: Id; userId: Id; role: Membership['role']
+}): Promise<Membership> {
+  const { rows } = await pool.query<Membership>(
+    `INSERT INTO memberships (tenant_id, user_id, role) VALUES ($1, $2, $3)
+     RETURNING id, tenant_id AS "tenantId", user_id AS "userId", role`,
+    [input.tenantId, input.userId, input.role],
+  )
+  return rows[0]
+}
+
 /* ---------- sessions ---------- */
 
 export async function createSession(
@@ -481,6 +570,10 @@ export async function getSession(token: string): Promise<TokenSession | null> {
 
 export async function deleteSession(token: string): Promise<void> {
   await pool.query(`DELETE FROM sessions WHERE token = $1`, [token])
+}
+
+export async function deleteAllSessionsForUser(userId: Id): Promise<void> {
+  await pool.query(`DELETE FROM sessions WHERE user_id = $1`, [userId])
 }
 
 /* ---------- workflows ---------- */
@@ -723,13 +816,43 @@ export async function listExecutionSteps(executionId: Id): Promise<ExecutionStep
 
 /* ---------- knowledge ---------- */
 
-function chunkText(text: string, size = 500): string[] {
-  const chunks: string[] = []
+function chunkText(text: string, size = 500, overlap = 50): string[] {
   const clean = text.replace(/\r\n/g, '\n').trim()
   if (!clean) return []
-  for (let i = 0; i < clean.length; i += size) {
-    chunks.push(clean.slice(i, i + size))
+
+  const paragraphs = clean.split(/\n{2,}/).filter(Boolean)
+  const chunks: string[] = []
+
+  for (const para of paragraphs) {
+    if (para.length <= size) {
+      chunks.push(para)
+      continue
+    }
+
+    const sentences = para.split(/(?<=[。！？.!?])\s*/).filter(Boolean)
+    let current = ''
+    for (const s of sentences) {
+      if (current.length + s.length > size && current.length > 0) {
+        chunks.push(current.trim())
+        current = s
+      } else {
+        current += (current ? '' : '') + s
+      }
+    }
+    if (current.trim()) chunks.push(current.trim())
   }
+
+  if (overlap > 0 && chunks.length > 1) {
+    const overlapped: string[] = [chunks[0]]
+    for (let i = 1; i < chunks.length; i++) {
+      const prev = overlapped[overlapped.length - 1]
+      const next = chunks[i]
+      const overlapText = prev.slice(-overlap)
+      overlapped.push(overlapText + next)
+    }
+    return overlapped
+  }
+
   return chunks
 }
 
@@ -964,6 +1087,49 @@ export async function searchKnowledgeChunksVector(
       }
     })
     .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+}
+
+export async function searchKnowledgeChunksHybrid(
+  tenantId: Id,
+  kbaseId: Id,
+  query: string,
+  limit = 5,
+  vectorWeight = 0.7,
+): Promise<KnowledgeChunkHit[]> {
+  const q = query.trim()
+  if (!q) return []
+
+  const [vectorHits, keywordHits] = await Promise.all([
+    searchKnowledgeChunksVector(tenantId, kbaseId, q, limit * 2).catch(() => []),
+    searchKnowledgeChunks(tenantId, kbaseId, q, limit * 2),
+  ])
+
+  if (!vectorHits.length && !keywordHits.length) return []
+  if (!vectorHits.length) return keywordHits.slice(0, limit)
+  if (!keywordHits.length) return vectorHits.slice(0, limit)
+
+  const scoreMap = new Map<string, { chunk: KnowledgeChunkHit; vector: number; keyword: number }>()
+  const k = 60
+
+  for (const [rank, hit] of vectorHits.entries()) {
+    scoreMap.set(hit.id, { chunk: hit, vector: 1 / (k + rank + 1), keyword: 0 })
+  }
+  for (const [rank, hit] of keywordHits.entries()) {
+    const entry = scoreMap.get(hit.id)
+    if (entry) {
+      entry.keyword = 1 / (k + rank + 1)
+    } else {
+      scoreMap.set(hit.id, { chunk: hit, vector: 0, keyword: 1 / (k + rank + 1) })
+    }
+  }
+
+  return [...scoreMap.values()]
+    .map(({ chunk, vector, keyword }) => ({
+      ...chunk,
+      score: vectorWeight * vector + (1 - vectorWeight) * keyword,
+    }))
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
 }
@@ -1709,18 +1875,51 @@ export async function getChannelConfig(
     [tenantId],
   )
   if (!rows[0]) return null
-  return { tenantId: rows[0].tenantId, wecom: rows[0].wecom ?? undefined, feishu: rows[0].feishu ?? undefined }
+  const { encryptSecret, decryptSecret } = await import('./crypto.js')
+  const result: ChannelConfig = { tenantId: rows[0].tenantId }
+  if (rows[0].wecom) {
+    const w = rows[0].wecom
+    try { if (w.secret.startsWith('enc:')) w.secret = decryptSecret(decodeEnc(w.secret)) } catch {}
+    try { if (w.encodingAESKey.startsWith('enc:')) w.encodingAESKey = decryptSecret(decodeEnc(w.encodingAESKey)) } catch {}
+    result.wecom = w
+  }
+  if (rows[0].feishu) {
+    const f = rows[0].feishu
+    try { if (f.appSecret.startsWith('enc:')) f.appSecret = decryptSecret(decodeEnc(f.appSecret)) } catch {}
+    try { if (f.encryptKey?.startsWith('enc:')) f.encryptKey = decryptSecret(decodeEnc(f.encryptKey)) } catch {}
+    result.feishu = f
+  }
+  return result
+}
+
+function encodeEnc(iv: Buffer, tag: Buffer, ciphertext: Buffer): string {
+  return 'enc:' + Buffer.concat([iv, tag, ciphertext]).toString('base64')
+}
+
+function decodeEnc(val: string): { iv: Buffer; tag: Buffer; ciphertext: Buffer } {
+  const buf = Buffer.from(val.slice(4), 'base64')
+  return { iv: buf.subarray(0, 12), tag: buf.subarray(12, 28), ciphertext: buf.subarray(28) }
 }
 
 export async function upsertWecomConfig(
   tenantId: Id,
   cfg: WecomChannelConfig,
 ): Promise<void> {
+  const { encryptSecret } = await import('./crypto.js')
+  const enc = { ...cfg }
+  if (enc.secret && !enc.secret.startsWith('enc:')) {
+    const e = encryptSecret(enc.secret)
+    enc.secret = encodeEnc(e.iv, e.tag, e.ciphertext)
+  }
+  if (enc.encodingAESKey && !enc.encodingAESKey.startsWith('enc:')) {
+    const e = encryptSecret(enc.encodingAESKey)
+    enc.encodingAESKey = encodeEnc(e.iv, e.tag, e.ciphertext)
+  }
   await pool.query(
     `INSERT INTO channel_configs (tenant_id, wecom)
      VALUES ($1, $2)
      ON CONFLICT (tenant_id) DO UPDATE SET wecom = EXCLUDED.wecom`,
-    [tenantId, cfg],
+    [tenantId, JSON.stringify(enc)],
   )
 }
 
@@ -1728,11 +1927,21 @@ export async function upsertFeishuConfig(
   tenantId: Id,
   cfg: FeishuChannelConfig,
 ): Promise<void> {
+  const { encryptSecret } = await import('./crypto.js')
+  const enc = { ...cfg }
+  if (enc.appSecret && !enc.appSecret.startsWith('enc:')) {
+    const e = encryptSecret(enc.appSecret)
+    enc.appSecret = encodeEnc(e.iv, e.tag, e.ciphertext)
+  }
+  if (enc.encryptKey && !enc.encryptKey.startsWith('enc:')) {
+    const e = encryptSecret(enc.encryptKey)
+    enc.encryptKey = encodeEnc(e.iv, e.tag, e.ciphertext)
+  }
   await pool.query(
     `INSERT INTO channel_configs (tenant_id, feishu)
      VALUES ($1, $2)
      ON CONFLICT (tenant_id) DO UPDATE SET feishu = EXCLUDED.feishu`,
-    [tenantId, cfg],
+    [tenantId, JSON.stringify(enc)],
   )
 }
 
@@ -1825,14 +2034,19 @@ export const db = {
   createSession,
   getSession,
   deleteSession,
+  deleteAllSessionsForUser,
   // user helpers
   findUserByEmailAndPassword,
   findUserById,
+  findUserByEmail,
+  createUser,
   // tenant helpers
   findTenantById,
   listTenantsForUser,
+  createTenant,
   // membership helpers
   findFirstMembershipForUser,
+  createMembership,
   // workflow helpers
   listWorkflows,
   findWorkflow,
@@ -1873,6 +2087,7 @@ export const db = {
   getDashboardStats,
   setChunkEmbedding,
   searchKnowledgeChunksVector,
+  searchKnowledgeChunksHybrid,
   countVectorizedChunks,
   listChunksWithoutEmbedding,
   enqueueExecutionJob,
@@ -1882,6 +2097,7 @@ export const db = {
   cancelExecution,
   deleteWorkflow,
   hashPassword,
+  verifyPassword,
   getOrCreateChatSession,
   insertChatMessage,
   listChatSessions,
@@ -1922,7 +2138,414 @@ export const db = {
   updateProvider,
   deleteProvider,
   setDefaultProvider,
+  setDefaultEmbeddingProvider,
+  // credential helpers
+  createCredential,
+  updateCredential,
+  listCredentials,
+  findCredential,
+  deleteCredential,
+  getDecryptedCredential,
+  createOAuthState,
+  findOAuthStateByState,
+  deleteOAuthState,
   // caches
   wecomAccessTokenCache,
   feishuTenantTokenCache,
 }
+
+/* ---------- credential helpers ---------- */
+
+export async function createCredential(
+  tenantId: Id,
+  input: { name: string; type: Credential['type']; data: Record<string, unknown> },
+): Promise<Credential> {
+  const { encryptCredentialData, buildMaskedPreview } = await import('./credential.js')
+  const encrypted = encryptCredentialData(input.type, input.data)
+  const maskedPreview = buildMaskedPreview(input.type, input.data)
+  const { rows } = await pool.query<Credential>(
+    `INSERT INTO credentials (tenant_id, name, type, data, masked_preview)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, tenant_id AS "tenantId", name, type, data, masked_preview AS "maskedPreview",
+               created_at AS "createdAt", updated_at AS "updatedAt"`,
+    [tenantId, input.name, input.type, JSON.stringify(encrypted), maskedPreview],
+  )
+  return rows[0]
+}
+
+export async function updateCredential(
+  tenantId: Id,
+  id: Id,
+  input: { name?: string; data?: Record<string, unknown> },
+): Promise<Credential | null> {
+  const existing = await findCredential(tenantId, id)
+  if (!existing) return null
+
+  const name = input.name ?? existing.name
+  let data = existing.data
+
+  if (input.data) {
+    const { encryptCredentialData, buildMaskedPreview } = await import('./credential.js')
+    const existingData = { ...existing.data, ...input.data }
+    data = encryptCredentialData(existing.type, existingData)
+    const { rows: updated } = await pool.query<Credential>(
+      `UPDATE credentials SET name = $1, data = $2, masked_preview = $3, updated_at = now()
+       WHERE id = $4 AND tenant_id = $5
+       RETURNING id, tenant_id AS "tenantId", name, type, data, masked_preview AS "maskedPreview",
+                 created_at AS "createdAt", updated_at AS "updatedAt"`,
+      [name, JSON.stringify(data), buildMaskedPreview(existing.type, existingData), id, tenantId],
+    )
+    return updated[0] ?? null
+  }
+
+  const { rows } = await pool.query<Credential>(
+    `UPDATE credentials SET name = $1, updated_at = now()
+     WHERE id = $2 AND tenant_id = $3
+     RETURNING id, tenant_id AS "tenantId", name, type, data, masked_preview AS "maskedPreview",
+               created_at AS "createdAt", updated_at AS "updatedAt"`,
+    [name, id, tenantId],
+  )
+  return rows[0] ?? null
+}
+
+export async function listCredentials(tenantId: Id): Promise<Credential[]> {
+  const { rows } = await pool.query<Credential>(
+    `SELECT id, tenant_id AS "tenantId", name, type, data, masked_preview AS "maskedPreview",
+            created_at AS "createdAt", updated_at AS "updatedAt"
+     FROM credentials WHERE tenant_id = $1 ORDER BY created_at DESC`,
+    [tenantId],
+  )
+  return rows
+}
+
+export async function findCredential(tenantId: Id, id: Id): Promise<Credential | null> {
+  const { rows } = await pool.query<Credential>(
+    `SELECT id, tenant_id AS "tenantId", name, type, data, masked_preview AS "maskedPreview",
+            created_at AS "createdAt", updated_at AS "updatedAt"
+     FROM credentials WHERE id = $1 AND tenant_id = $2`,
+    [id, tenantId],
+  )
+  return rows[0] ?? null
+}
+
+export async function deleteCredential(tenantId: Id, id: Id): Promise<void> {
+  await pool.query(`DELETE FROM credentials WHERE id = $1 AND tenant_id = $2`, [id, tenantId])
+}
+
+export async function getDecryptedCredential(
+  tenantId: Id,
+  id: Id,
+): Promise<Credential | null> {
+  const cred = await findCredential(tenantId, id)
+  if (!cred) return null
+  const { decryptCredentialData } = await import('./credential.js')
+  cred.data = decryptCredentialData(cred.type, cred.data)
+  return cred
+}
+
+export async function createOAuthState(input: {
+  credentialId: Id
+  state: string
+  redirectUri: string
+  extra?: Record<string, unknown>
+  ttlSeconds?: number
+}): Promise<OAuthState> {
+  const expiresAt = new Date(Date.now() + (input.ttlSeconds ?? 600) * 1000).toISOString()
+  const { rows } = await pool.query<OAuthState>(
+    `INSERT INTO credential_oauth_states (credential_id, state, redirect_uri, extra, expires_at)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING id, credential_id AS "credentialId", state, redirect_uri AS "redirectUri",
+               extra, expires_at AS "expiresAt", created_at AS "createdAt"`,
+    [input.credentialId, input.state, input.redirectUri, JSON.stringify(input.extra ?? {}), expiresAt],
+  )
+  return rows[0]
+}
+
+export async function findOAuthStateByState(state: string): Promise<OAuthState | null> {
+  const { rows } = await pool.query<OAuthState>(
+    `SELECT id, credential_id AS "credentialId", state, redirect_uri AS "redirectUri",
+            extra, expires_at AS "expiresAt", created_at AS "createdAt"
+     FROM credential_oauth_states WHERE state = $1 AND expires_at > now()`,
+    [state],
+  )
+  return rows[0] ?? null
+}
+
+export async function deleteOAuthState(state: string): Promise<void> {
+  await pool.query(`DELETE FROM credential_oauth_states WHERE state = $1`, [state])
+}
+
+/* ---------- taobao helpers ---------- */
+
+export async function getTaobaoConfig(
+  tenantId: Id,
+): Promise<TaobaoChannelConfig | null> {
+  const { rows } = await pool.query<{
+    tenantId: string
+    appKey: string
+    appSecret: string
+    session: string
+    sellerNick: string
+    tmcGroup: string
+  }>(
+    `SELECT tenant_id AS "tenantId", app_key AS "appKey", app_secret AS "appSecret", session, seller_nick AS "sellerNick", tmc_group AS "tmcGroup"
+       FROM taobao_channel_configs WHERE tenant_id = $1`,
+    [tenantId],
+  )
+  if (!rows[0]) return null
+  return {
+    appKey: rows[0].appKey,
+    appSecret: rows[0].appSecret,
+    session: rows[0].session,
+    sellerNick: rows[0].sellerNick,
+    tmcGroup: rows[0].tmcGroup,
+  }
+}
+
+export async function upsertTaobaoConfig(
+  tenantId: Id,
+  cfg: TaobaoChannelConfig,
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO taobao_channel_configs (tenant_id, app_key, app_secret, session, seller_nick, tmc_group)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (tenant_id) DO UPDATE SET
+       app_key = EXCLUDED.app_key,
+       app_secret = EXCLUDED.app_secret,
+       session = EXCLUDED.session,
+       seller_nick = EXCLUDED.seller_nick,
+       tmc_group = EXCLUDED.tmc_group`,
+    [tenantId, cfg.appKey, cfg.appSecret, cfg.session, cfg.sellerNick, cfg.tmcGroup],
+  )
+}
+
+
+/* ---------- store profile helpers ---------- */
+
+export interface StoreProfileRow {
+  tenantId: string
+  industry: string
+  name: string
+  slogan: string
+  address: string
+  landmark: string
+  parking: string
+  phone: string
+  wechat: string
+  hoursLunch: string
+  hoursDinner: string
+  hoursWeekend: string
+  holidayNote: string
+  avgPrice: string
+  currentPromotions: Array<{ title: string; detail: string }>
+  features: string[]
+}
+
+export async function getStoreProfile(tenantId: Id): Promise<StoreProfileRow | null> {
+  const { rows } = await pool.query<StoreProfileRow>(
+    `SELECT tenant_id AS "tenantId", industry, name, slogan, address, landmark, parking,
+            phone, wechat, hours_lunch AS "hoursLunch", hours_dinner AS "hoursDinner",
+            hours_weekend AS "hoursWeekend", holiday_note AS "holidayNote",
+            avg_price AS "avgPrice", current_promotions AS "currentPromotions",
+            features
+     FROM store_profiles WHERE tenant_id = $1`,
+    [tenantId],
+  )
+  if (!rows[0]) return null
+  return rows[0]
+}
+
+
+/* ---------- bot assistant helpers ---------- */
+
+export type BotScenarioRow = {
+  id: string
+  tenantId: string | null
+  industry: string
+  name: string
+  description: string
+  icon: string
+  steps: unknown[]
+  workflowId: string | null
+  isBuiltin: boolean
+  isActive: boolean
+}
+
+export type BotConfigRow = {
+  id: string
+  tenantId: string
+  name: string
+  greeting: string
+  activeScenarios: string[]
+  notifyAdmins: string[]
+  autoReply: boolean
+}
+
+export type BotSessionRow = {
+  id: string
+  tenantId: string
+  channel: string
+  externalId: string
+  step: number
+  scenarioId: string | null
+  params: Record<string, string>
+  state: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type BotMessageRow = {
+  id: string
+  tenantId: string
+  sessionId: string
+  direction: string
+  senderId: string
+  content: string
+  createdAt: string
+}
+
+export async function getBotConfig(tenantId: Id): Promise<BotConfigRow | null> {
+  const { rows } = await pool.query<BotConfigRow>(
+    `SELECT id, tenant_id AS "tenantId", name, greeting,
+            active_scenarios AS "activeScenarios",
+            notify_admins AS "notifyAdmins",
+            auto_reply AS "autoReply"
+     FROM bot_configs WHERE tenant_id = $1`,
+    [tenantId],
+  )
+  if (!rows[0]) return null
+  return {
+    ...rows[0],
+    activeScenarios: rows[0].activeScenarios ?? [],
+    notifyAdmins: rows[0].notifyAdmins ?? [],
+  }
+}
+
+export async function upsertBotConfig(tenantId: Id, cfg: {
+  name: string
+  greeting: string
+  activeScenarios: string[]
+  notifyAdmins: string[]
+  autoReply: boolean
+}): Promise<void> {
+  await pool.query(
+    `INSERT INTO bot_configs (tenant_id, name, greeting, active_scenarios, notify_admins, auto_reply)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (tenant_id) DO UPDATE SET
+       name = EXCLUDED.name,
+       greeting = EXCLUDED.greeting,
+       active_scenarios = EXCLUDED.active_scenarios,
+       notify_admins = EXCLUDED.notify_admins,
+       auto_reply = EXCLUDED.auto_reply,
+       updated_at = now()`,
+    [tenantId, cfg.name, cfg.greeting, cfg.activeScenarios, cfg.notifyAdmins, cfg.autoReply],
+  )
+}
+
+export async function getBotSession(
+  tenantId: Id,
+  channel: string,
+  externalId: string,
+): Promise<BotSessionRow | null> {
+  const { rows } = await pool.query<BotSessionRow>(
+    `SELECT id, tenant_id AS "tenantId", channel, external_id AS "externalId",
+            step, scenario_id AS "scenarioId", params, state,
+            created_at AS "createdAt", updated_at AS "updatedAt"
+     FROM bot_sessions
+     WHERE tenant_id = $1 AND channel = $2 AND external_id = $3`,
+    [tenantId, channel, externalId],
+  )
+  if (!rows[0]) return null
+  return {
+    ...rows[0],
+    params: (rows[0].params as Record<string, string>) ?? {},
+  }
+}
+
+export async function createBotSession(
+  tenantId: Id,
+  channel: string,
+  externalId: string,
+): Promise<BotSessionRow> {
+  const { rows } = await pool.query<BotSessionRow>(
+    `INSERT INTO bot_sessions (tenant_id, channel, external_id)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (tenant_id, channel, external_id) DO UPDATE SET updated_at = now()
+     RETURNING id, tenant_id AS "tenantId", channel, external_id AS "externalId",
+               step, scenario_id AS "scenarioId", params, state,
+               created_at AS "createdAt", updated_at AS "updatedAt"`,
+    [tenantId, channel, externalId],
+  )
+  return {
+    ...rows[0],
+    params: (rows[0].params as Record<string, string>) ?? {},
+  }
+}
+
+export async function updateBotSession(
+  sessionId: string,
+  patch: { state?: string; step?: number; scenarioId?: string; params?: Record<string, string> },
+): Promise<void> {
+  const sets: string[] = ['updated_at = now()']
+  const vals: unknown[] = [sessionId]
+  let idx = 2
+  if (patch.state !== undefined) { sets.push(`state = $${idx++}`); vals.push(patch.state) }
+  if (patch.step !== undefined) { sets.push(`step = $${idx++}`); vals.push(patch.step) }
+  if (patch.scenarioId !== undefined) { sets.push(`scenario_id = $${idx++}`); vals.push(patch.scenarioId) }
+  if (patch.params !== undefined) { sets.push(`params = $${idx++}`); vals.push(JSON.stringify(patch.params)) }
+  await pool.query(
+    `UPDATE bot_sessions SET ${sets.join(', ')} WHERE id = $1`,
+    vals,
+  )
+}
+
+export async function getTenantBotScenarios(tenantId: Id): Promise<BotScenarioRow[]> {
+  const { rows } = await pool.query<BotScenarioRow>(
+    `SELECT id, tenant_id AS "tenantId", industry, name, description, icon,
+            steps, workflow_id AS "workflowId",
+            is_builtin AS "isBuiltin", is_active AS "isActive"
+     FROM bot_scenarios
+     WHERE tenant_id = $1 AND is_active = true`,
+    [tenantId],
+  )
+  return rows
+}
+
+export async function listBotSessions(tenantId: Id): Promise<BotSessionRow[]> {
+  const { rows } = await pool.query<BotSessionRow>(
+    `SELECT id, tenant_id AS "tenantId", channel, external_id AS "externalId",
+            step, scenario_id AS "scenarioId", params, state,
+            created_at AS "createdAt", updated_at AS "updatedAt"
+     FROM bot_sessions WHERE tenant_id = $1
+     ORDER BY updated_at DESC LIMIT 50`,
+    [tenantId],
+  )
+  return rows.map(r => ({ ...r, params: (r.params as Record<string, string>) ?? {} }))
+}
+
+export async function getBotMessages(tenantId: Id, sessionId: string): Promise<BotMessageRow[]> {
+  const { rows } = await pool.query<BotMessageRow>(
+    `SELECT id, tenant_id AS "tenantId", session_id AS "sessionId",
+            direction, sender_id AS "senderId", content,
+            created_at AS "createdAt"
+     FROM bot_messages WHERE tenant_id = $1 AND session_id = $2
+     ORDER BY created_at ASC`,
+    [tenantId, sessionId],
+  )
+  return rows
+}
+
+export async function insertBotMessage(
+  tenantId: Id,
+  sessionId: string,
+  direction: string,
+  senderId: string,
+  content: string,
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO bot_messages (tenant_id, session_id, direction, sender_id, content)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [tenantId, sessionId, direction, senderId, content],
+  )
+}
+

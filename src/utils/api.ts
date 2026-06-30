@@ -1,6 +1,4 @@
-export type ApiOk<T> = { success: true; data: T }
-export type ApiErr = { success: false; error: string }
-export type ApiResponse<T> = ApiOk<T> | ApiErr
+export type ApiResponse<T> = { success: boolean; data?: T; error?: string }
 
 export async function apiRequest<T>(
   path: string,
@@ -19,10 +17,11 @@ export async function apiRequest<T>(
     body: options?.body ? JSON.stringify(options.body) : undefined,
   })
 
-  const data = (await res.json().catch(() => null)) as ApiResponse<T> | null
-  if (!data) {
+  const raw = (await res.json().catch(() => null)) as { success?: boolean; data?: T; error?: string } | null
+  if (!raw) {
     return { success: false, error: 'Bad response' }
   }
-  return data
+  return raw.success
+    ? { success: true, data: raw.data as T }
+    : { success: false, error: raw.error ?? 'Unknown error' }
 }
-

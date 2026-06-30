@@ -13,7 +13,10 @@ import Executions from '@/pages/Executions'
 import Knowledge from '@/pages/Knowledge'
 import AIModels from '@/pages/AIModels'
 import Apps from '@/pages/Apps'
+import Credentials from '@/pages/Credentials'
+import Profile from '@/pages/Profile'
 import ChatWidget from '@/pages/ChatWidget'
+import BotAssistant from '@/pages/BotAssistant'
 import AppShell from '@/components/AppShell'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -50,10 +53,13 @@ export default function App() {
           <Route path="/executions" element={<Executions />} />
           <Route path="/inbox" element={<Inbox />} />
           <Route path="/channels" element={<Channels />} />
+        <Route path="/bot" element={<BotAssistant />} />
           <Route path="/connectors" element={<Connectors />} />
           <Route path="/ai/knowledge" element={<Knowledge />} />
           <Route path="/ai/models" element={<AIModels />} />
           <Route path="/ai/apps" element={<Apps />} />
+          <Route path="/credentials" element={<Credentials />} />
+          <Route path="/profile" element={<Profile />} />
           <Route path="/admin" element={<Admin />} />
         </Route>
 

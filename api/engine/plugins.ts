@@ -1,8 +1,10 @@
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { NodeMeta } from './nodes.js'
 import { NODE_REGISTRY } from './nodes.js'
+import { nodeRegistry } from './nodes/registry.js'
+import type { NodeExecutor } from './nodes/registry.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -36,6 +38,23 @@ export function loadPluginNodes(): NodeMeta[] {
       })
     } catch (e) {
       console.warn('[plugins] skip', name.name, e)
+    }
+
+    const executorPath = path.join(pluginsDir, name.name, 'executor.ts')
+    const executorBuiltPath = path.join(pluginsDir, name.name, 'executor.js')
+    const foundPath = existsSync(executorBuiltPath) ? executorBuiltPath : existsSync(executorPath) ? executorPath : null
+    if (foundPath) {
+      const fileUrl = pathToFileURL(foundPath).href
+      import(fileUrl)
+        .then((mod: { default?: NodeExecutor }) => {
+          if (mod.default) {
+            nodeRegistry.register(mod.default)
+            console.log(`[plugins] registered executor: ${mod.default.type}`)
+          }
+        })
+        .catch((e: unknown) => {
+          console.warn(`[plugins] failed to load executor ${name.name}:`, e)
+        })
     }
   }
   return loaded

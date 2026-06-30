@@ -9,6 +9,18 @@ export async function getDefaultProvider(tenantId: string) {
   return { provider, secret }
 }
 
+export async function getEmbeddingProvider(tenantId: string) {
+  const providers = await db.listProviders(tenantId)
+  const provider = providers.find((p) => p.isDefaultEmbedding && p.defaultEmbeddingModel)
+    ?? providers.find((p) => p.isDefault && p.defaultEmbeddingModel)
+    ?? providers[0]
+  if (!provider) throw new Error('未配置 AI 模型提供商')
+  if (!provider.defaultEmbeddingModel) throw new Error('未配置 Embedding 模型')
+  const secret = await db.getProviderSecret(tenantId, provider.id)
+  if (!secret) throw new Error('AI 提供商凭据不可用')
+  return { provider, secret }
+}
+
 export async function chatCompletion(
   tenantId: string,
   messages: { role: string; content: string; tool_calls?: unknown }[],
@@ -92,9 +104,8 @@ export async function chatCompletionStream(
 }
 
 export async function createEmbedding(tenantId: string, text: string): Promise<number[]> {
-  const { provider, secret } = await getDefaultProvider(tenantId)
-  const model = provider.defaultEmbeddingModel
-  if (!model) throw new Error('未配置 Embedding 模型')
+  const { provider, secret } = await getEmbeddingProvider(tenantId)
+  const model = provider.defaultEmbeddingModel!
   const url = `${secret.baseUrl}/embeddings`
   const r = await fetch(url, {
     method: 'POST',

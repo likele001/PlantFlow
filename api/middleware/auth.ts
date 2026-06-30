@@ -20,13 +20,13 @@ export async function requireAuth(
       : null
 
   if (!token) {
-    res.status(401).json({ success: false, error: 'Unauthorized' })
+    res.status(401).json({ success: false, error: '请先登录' })
     return
   }
 
   const session = await db.getSession(token)
   if (!session) {
-    res.status(401).json({ success: false, error: 'Unauthorized' })
+    res.status(401).json({ success: false, error: '会话已过期，请重新登录' })
     return
   }
 

@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
-import { Activity, Blocks, BookOpen, Bot, Inbox, LayoutDashboard, MessageCircleMore, Settings2, Sparkles, Workflow } from 'lucide-react'
+import { Activity, Blocks, BookOpen, Bot, Inbox, KeyRound, LayoutDashboard, MessageCircleMore, Settings2, Sparkles, Workflow } from 'lucide-react'
 
 type NavItem = {
   to: string
@@ -15,8 +15,10 @@ const items: NavItem[] = [
   { to: '/inbox', label: '会话中心', icon: <Inbox className="h-4 w-4" /> },
   { to: '/channels', label: '渠道接入', icon: <MessageCircleMore className="h-4 w-4" /> },
   { to: '/connectors', label: '连接器', icon: <Blocks className="h-4 w-4" /> },
+  { to: '/credentials', label: '凭证管理', icon: <KeyRound className="h-4 w-4" /> },
   { to: '/ai/models', label: 'AI 模型', icon: <Sparkles className="h-4 w-4" /> },
   { to: '/ai/apps', label: '对话应用', icon: <Bot className="h-4 w-4" /> },
+  { to: '/bot', label: '助手配置', icon: <Bot className="h-4 w-4" /> },
   { to: '/ai/knowledge', label: '知识库', icon: <BookOpen className="h-4 w-4" /> },
   { to: '/admin', label: '系统管理', icon: <Settings2 className="h-4 w-4" /> },
 ]

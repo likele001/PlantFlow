@@ -7,7 +7,7 @@ const router = Router()
 router.get('/', async (req: AuthedRequest, res: Response): Promise<void> => {
   const tenantId = req.auth?.tenantId
   if (!tenantId) {
-    res.status(401).json({ success: false, error: 'Unauthorized' })
+    res.status(401).json({ success: false, error: '请先登录' })
     return
   }
 

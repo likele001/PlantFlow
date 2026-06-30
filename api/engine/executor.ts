@@ -1,15 +1,14 @@
-import { db } from '../store.js'
-import { renderTemplate } from './template.js'
-import { evaluateCondition } from './evaluate.js'
-import { chatCompletion, createEmbedding } from './llm.js'
+import './nodes/index.js'
+import { injectRunWorkflow } from './nodes/logic.js'
+import { db, getStoreProfile } from '../store.js'
 import {
   findStartNodes,
   nextNodeIds,
   branchTargets,
-  parseLoopItems,
   findMergeNodeId,
 } from './graph.js'
-import type { WorkflowDefinition, WorkflowNode, RunContext } from './types.js'
+import { nodeRegistry } from './nodes/registry.js'
+import type { WorkflowDefinition, RunContext } from './types.js'
 
 async function runSubgraph(input: {
   tenantId: string
@@ -31,8 +30,14 @@ async function runSubgraph(input: {
     visited.add(nodeId)
 
     const node = input.def.nodes.find((n) => n.id === nodeId)
-    if (!node || node.type.startsWith('trigger.') || node.type === 'logic.loop') continue
-    if (node.type === 'logic.merge' || node.type === 'logic.parallel') continue
+    if (!node || nodeRegistry.isStructural(node.type)) continue
+
+    const executor = nodeRegistry.get(node.type)
+    if (!executor) {
+      failed = true
+      lastError = `未注册的节点类型: ${node.type}`
+      break
+    }
 
     const step = await db.createExecutionStep({
       executionId: input.executionId,
@@ -43,7 +48,7 @@ async function runSubgraph(input: {
     })
 
     try {
-      const output = await executeNode(input.tenantId, node, input.ctx)
+      const output = await executor.execute({ tenantId: input.tenantId, node, ctx: input.ctx, executionId: input.executionId })
       input.ctx.steps[node.id] = output
       await db.finishExecutionStep(step.id, 'success', output, null)
       for (const nextId of nextNodeIds(node, output, input.def.edges)) {
@@ -56,321 +61,6 @@ async function runSubgraph(input: {
     }
   }
   return { failed, error: lastError }
-}
-
-async function searchKnowledge(
-  tenantId: string,
-  kbaseId: string,
-  query: string,
-  limit = 5,
-) {
-  const vectorHits = await db.searchKnowledgeChunksVector(tenantId, kbaseId, query, limit).catch(() => [])
-  if (vectorHits.length) return { chunks: vectorHits, mode: 'vector' as const }
-  const chunks = await db.searchKnowledgeChunks(tenantId, kbaseId, query, limit)
-  return { chunks, mode: 'keyword' as const }
-}
-
-async function getWecomToken(tenantId: string, cfg: { corpId: string; secret: string }) {
-  const cached = db.wecomAccessTokenCache.get(tenantId)
-  if (cached && cached.expiresAt > Date.now() + 30_000) return cached.token
-  const url = `https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${encodeURIComponent(cfg.corpId)}&corpsecret=${encodeURIComponent(cfg.secret)}`
-  const res = await fetch(url)
-  const data = (await res.json().catch(() => null)) as { access_token?: string; expires_in?: number; errmsg?: string } | null
-  if (!data?.access_token) throw new Error(data?.errmsg ?? '获取企业微信 token 失败')
-  const ttl = typeof data.expires_in === 'number' ? data.expires_in : 7200
-  db.wecomAccessTokenCache.set(tenantId, { token: data.access_token, expiresAt: Date.now() + ttl * 1000 })
-  return data.access_token
-}
-
-async function getFeishuToken(tenantId: string, cfg: { appId: string; appSecret: string }) {
-  const cached = db.feishuTenantTokenCache.get(tenantId)
-  if (cached && cached.expiresAt > Date.now() + 30_000) return cached.token
-  const res = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ app_id: cfg.appId, app_secret: cfg.appSecret }),
-  })
-  const data = (await res.json().catch(() => null)) as { tenant_access_token?: string; expire?: number; msg?: string } | null
-  if (!data?.tenant_access_token) throw new Error(data?.msg ?? '获取飞书 token 失败')
-  const ttl = typeof data.expire === 'number' ? data.expire : 7200
-  db.feishuTenantTokenCache.set(tenantId, { token: data.tenant_access_token, expiresAt: Date.now() + ttl * 1000 })
-  return data.tenant_access_token
-}
-
-async function executeAgent(
-  tenantId: string,
-  node: WorkflowNode,
-  ctx: RunContext,
-): Promise<{ text: string; steps: unknown[] }> {
-  const cfg = node.config ?? {}
-  const kbaseId = String(cfg.kbaseId ?? '')
-  const maxSteps = Math.min(Number(cfg.maxSteps ?? 4), 8)
-  const systemPrompt = renderTemplate(String(cfg.systemPrompt ?? ''), ctx)
-  const userPrompt = renderTemplate(String(cfg.userPrompt ?? '{{trigger.content}}'), ctx)
-
-  const tools: unknown[] = []
-  if (kbaseId) {
-    tools.push({
-      type: 'function',
-      function: {
-        name: 'search_knowledge',
-        description: '检索知识库获取相关文档片段',
-        parameters: {
-          type: 'object',
-          properties: { query: { type: 'string', description: '检索关键词' } },
-          required: ['query'],
-        },
-      },
-    })
-  }
-  if (cfg.enableHttp !== false) {
-    tools.push({
-      type: 'function',
-      function: {
-        name: 'http_request',
-        description: '发起 HTTP GET/POST 请求',
-        parameters: {
-          type: 'object',
-          properties: {
-            url: { type: 'string' },
-            method: { type: 'string', enum: ['GET', 'POST', 'PUT', 'DELETE'] },
-            body: { type: 'string' },
-          },
-          required: ['url'],
-        },
-      },
-    })
-  }
-
-  const messages: { role: string; content: string; tool_calls?: unknown }[] = [
-    { role: 'system', content: systemPrompt || '你是简洁高效的中文助手。' },
-    { role: 'user', content: userPrompt },
-  ]
-
-  const agentSteps: unknown[] = []
-
-  for (let i = 0; i < maxSteps; i++) {
-    const msg = await chatCompletion(tenantId, messages, { tools: tools.length ? tools : undefined })
-    const toolCalls = (msg as { tool_calls?: { id: string; function: { name: string; arguments: string } }[] }).tool_calls
-
-    if (!toolCalls?.length) {
-      const text = String((msg as { content?: string }).content ?? '')
-      return { text, steps: agentSteps }
-    }
-
-    messages.push({ role: 'assistant', content: msg.content ?? '', tool_calls: toolCalls })
-
-    for (const tc of toolCalls) {
-      let result = ''
-      if (tc.function.name === 'search_knowledge' && kbaseId) {
-        const args = JSON.parse(tc.function.arguments || '{}') as { query?: string }
-        const q = args.query || userPrompt
-        const hits = await searchKnowledge(tenantId, kbaseId, q, 5)
-        result = JSON.stringify(hits.chunks)
-        agentSteps.push({ tool: 'search_knowledge', query: q, hits: hits.chunks.length })
-      } else if (tc.function.name === 'http_request') {
-        const args = JSON.parse(tc.function.arguments || '{}') as { url?: string; method?: string; body?: string }
-        const url = String(args.url ?? '')
-        if (!url) result = JSON.stringify({ error: 'missing url' })
-        else {
-          const r = await fetch(url, {
-            method: (args.method ?? 'GET').toUpperCase(),
-            headers: { 'Content-Type': 'application/json' },
-            body: args.body && args.method !== 'GET' ? args.body : undefined,
-          })
-          const text = await r.text()
-          result = JSON.stringify({ status: r.status, body: text.slice(0, 4000) })
-          agentSteps.push({ tool: 'http_request', url, status: r.status })
-        }
-      } else {
-        result = JSON.stringify({ error: 'unknown tool' })
-      }
-      messages.push({ role: 'tool', tool_call_id: tc.id, content: result } as never)
-    }
-  }
-
-  const final = await chatCompletion(tenantId, messages)
-  return { text: String((final as { content?: string }).content ?? ''), steps: agentSteps }
-}
-
-export async function executeNode(
-  tenantId: string,
-  node: WorkflowNode,
-  ctx: RunContext,
-): Promise<unknown> {
-  const cfg = node.config ?? {}
-
-  if (node.type.startsWith('trigger.')) {
-    return { ...ctx.trigger }
-  }
-
-  if (node.type === 'logic.if') {
-    const branch = evaluateCondition(ctx, cfg as { left?: string; operator?: string; right?: string })
-    return { branch, evaluated: true }
-  }
-
-  if (node.type === 'logic.switch') {
-    const value = renderTemplate(String(cfg.value ?? ''), ctx)
-    const cases = (cfg.cases ?? []) as { match: string; id: string }[]
-    for (const c of cases) {
-      const m = String(c.match ?? '')
-      if (m && (value === m || value.includes(m))) {
-        return { matched: c.id || `case_${cases.indexOf(c)}`, value }
-      }
-    }
-    return { matched: 'default', value }
-  }
-
-  if (node.type === 'logic.loop') {
-    const items = parseLoopItems(cfg, ctx)
-    const itemVar = String(cfg.itemVar ?? 'item')
-    return { items, count: items.length, itemVar, mode: 'loop' }
-  }
-
-  if (node.type === 'logic.set') {
-    const vars = (cfg.variables ?? {}) as Record<string, string>
-    for (const [k, v] of Object.entries(vars)) {
-      ctx.vars[k] = renderTemplate(v, ctx)
-    }
-    return { vars: { ...ctx.vars } }
-  }
-
-  if (node.type === 'logic.delay') {
-    const ms = Math.min(Number(cfg.ms ?? 300), 30_000)
-    await new Promise((r) => setTimeout(r, ms))
-    return { delayedMs: ms }
-  }
-
-  if (node.type === 'logic.parallel') {
-    return { mode: 'parallel' }
-  }
-
-  if (node.type === 'logic.merge') {
-    return { merged: true, steps: { ...ctx.steps }, mode: String(cfg.mode ?? 'all') }
-  }
-
-  if (node.type === 'workflow.sub') {
-    const targetId = String(cfg.targetWorkflowId ?? '')
-    if (!targetId) throw new Error('子工作流未选择目标')
-    const depth = Number(ctx.vars.__sub_depth ?? 0)
-    if (depth >= Number(cfg.maxDepth ?? 3)) throw new Error('子工作流嵌套过深')
-    const inputVars = (cfg.inputMapping ?? {}) as Record<string, string>
-    const triggerData: Record<string, unknown> = { ...ctx.trigger }
-    for (const [k, v] of Object.entries(inputVars)) {
-      triggerData[k] = renderTemplate(v, ctx)
-    }
-    const sub = await runWorkflow({
-      tenantId,
-      workflowId: targetId,
-      triggerType: 'workflow.sub',
-      triggerData,
-      parentExecutionId: String(ctx.vars.__execution_id ?? ''),
-      subDepth: depth + 1,
-    })
-    return { subExecutionId: sub.executionId, status: sub.status }
-  }
-
-  if (node.type === 'ai.knowledge') {
-    const kbaseId = String(cfg.kbaseId ?? '')
-    const query = renderTemplate(String(cfg.query ?? '{{trigger.content}}'), ctx)
-    if (!kbaseId) throw new Error('知识库节点未选择知识库')
-    return searchKnowledge(tenantId, kbaseId, query, Number(cfg.topK ?? 5))
-  }
-
-  if (node.type === 'ai.chat') {
-    const systemPrompt = renderTemplate(String(cfg.systemPrompt ?? ''), ctx)
-    const userPrompt = renderTemplate(String(cfg.userPrompt ?? '{{trigger.content}}'), ctx)
-    const msg = await chatCompletion(tenantId, [
-      ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
-      { role: 'user', content: userPrompt },
-    ], { model: cfg.model ? String(cfg.model) : undefined })
-    const text = String((msg as { content?: string }).content ?? '')
-    return { text, model: cfg.model }
-  }
-
-  if (node.type === 'ai.agent') {
-    return executeAgent(tenantId, node, ctx)
-  }
-
-  if (node.type === 'http.request') {
-    let url = renderTemplate(String(cfg.url ?? ''), ctx)
-    const method = String(cfg.method ?? 'GET').toUpperCase()
-    const headers: Record<string, string> = {}
-    const connectorId = String(cfg.connectorId ?? '')
-    if (connectorId) {
-      const conn = await db.findConnector(tenantId, connectorId)
-      if (!conn) throw new Error('连接器不存在')
-      const c = conn.config as { baseUrl?: string; headers?: Record<string, string> }
-      if (c.baseUrl && !url.startsWith('http')) url = `${c.baseUrl.replace(/\/$/, '')}/${url.replace(/^\//, '')}`
-      else if (c.baseUrl && !cfg.url) url = c.baseUrl
-      if (c.headers) {
-        for (const [k, v] of Object.entries(c.headers)) headers[k] = renderTemplate(String(v), ctx)
-      }
-    }
-    if (!url) throw new Error('HTTP 节点缺少 URL')
-    if (cfg.headers && typeof cfg.headers === 'object') {
-      for (const [k, v] of Object.entries(cfg.headers as Record<string, string>)) {
-        headers[k] = renderTemplate(String(v), ctx)
-      }
-    }
-    let body: string | undefined
-    if (cfg.body && method !== 'GET') body = renderTemplate(String(cfg.body), ctx)
-    const r = await fetch(url, { method, headers, body })
-    const text = await r.text()
-    let json: unknown = null
-    try { json = JSON.parse(text) } catch { /* text */ }
-    return { status: r.status, body: json ?? text }
-  }
-
-  if (node.type === 'channel.send') {
-    const channel = String(cfg.channel ?? ctx.trigger.channel ?? 'wecom')
-    const content = renderTemplate(String(cfg.content ?? ''), ctx)
-    if (!content) throw new Error('消息推送节点缺少内容')
-
-    if (channel === 'wecom') {
-      const chCfg = (await db.getChannelConfig(tenantId))?.wecom
-      if (!chCfg) throw new Error('企业微信未配置')
-      const toUser = renderTemplate(String(cfg.toUser ?? ctx.trigger.fromId ?? ''), ctx)
-      const accessToken = await getWecomToken(tenantId, chCfg)
-      const url = `https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token=${encodeURIComponent(accessToken)}`
-      const r = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          touser: toUser || undefined,
-          msgtype: 'text',
-          agentid: chCfg.agentId,
-          text: { content },
-          safe: 0,
-        }),
-      })
-      const data = (await r.json().catch(() => null)) as { errcode?: number; errmsg?: string } | null
-      if (data?.errcode !== 0) throw new Error(data?.errmsg ?? '企业微信发送失败')
-      return { sent: true, channel: 'wecom' }
-    }
-
-    if (channel === 'feishu') {
-      const chCfg = (await db.getChannelConfig(tenantId))?.feishu
-      if (!chCfg) throw new Error('飞书未配置')
-      const receiveId = renderTemplate(String(cfg.receiveId ?? ctx.trigger.chatId ?? ''), ctx)
-      const token = await getFeishuToken(tenantId, chCfg)
-      const r = await fetch(`https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          receive_id: receiveId,
-          msg_type: 'text',
-          content: JSON.stringify({ text: content }),
-        }),
-      })
-      const data = (await r.json().catch(() => null)) as { code?: number; msg?: string } | null
-      if ((data?.code ?? 0) !== 0) throw new Error(data?.msg ?? '飞书发送失败')
-      return { sent: true, channel: 'feishu' }
-    }
-    throw new Error(`不支持的渠道: ${channel}`)
-  }
-
-  return { ok: true, type: node.type }
 }
 
 export async function runWorkflow(input: {
@@ -394,13 +84,18 @@ export async function runWorkflow(input: {
     parentExecutionId: input.parentExecutionId,
   })
 
+  const store = await getStoreProfile(input.tenantId).catch(() => null)
+
   const ctx: RunContext = {
     trigger: input.triggerData,
     steps: {},
     vars: {
       __execution_id: execution.id,
       __sub_depth: input.subDepth ?? 0,
+      store: store ?? {},
     },
+    loopIndex: 0,
+    loopItem: null,
   }
 
   const queue = findStartNodes(def).map((n) => n.id)
@@ -416,30 +111,28 @@ export async function runWorkflow(input: {
     const node = def.nodes.find((n) => n.id === nodeId)
     if (!node) continue
 
+    const executor = nodeRegistry.get(node.type)
+    if (!executor) {
+      failed = true
+      lastError = `未注册的节点类型: ${node.type}`
+      break
+    }
+
     const step = await db.createExecutionStep({
       executionId: execution.id,
       nodeId: node.id,
       nodeType: node.type,
-      nodeLabel: node.label,
+      nodeLabel: node.label ?? node.type,
       input: { trigger: ctx.trigger, vars: ctx.vars, priorSteps: { ...ctx.steps } },
     })
 
     try {
-      const output = await executeNode(input.tenantId, node, ctx)
+      const output = await executor.execute({ tenantId: input.tenantId, node, ctx, executionId: execution.id })
       ctx.steps[node.id] = output
       await db.finishExecutionStep(step.id, 'success', output, null)
 
-      if (node.type === 'channel.send' && ctx.trigger.conversationId) {
-        const content = renderTemplate(String(node.config?.content ?? ''), ctx)
-        await db.insertMessage(
-          input.tenantId,
-          String(ctx.trigger.conversationId),
-          'out',
-          'workflow',
-          content,
-          { executionId: execution.id, nodeId: node.id },
-          '工作流',
-        )
+      if (executor.onAfter) {
+        await executor.onAfter({ tenantId: input.tenantId, node, ctx, executionId: execution.id }, output)
       }
 
       if (node.type === 'logic.loop') {
@@ -482,7 +175,7 @@ export async function runWorkflow(input: {
               executionId: execution.id,
               def,
               startIds: [startId],
-              ctx: { trigger: { ...ctx.trigger }, steps: { ...ctx.steps }, vars: { ...ctx.vars } },
+              ctx: { trigger: { ...ctx.trigger }, steps: { ...ctx.steps }, vars: { ...ctx.vars }, loopIndex: 0, loopItem: null },
               stopBeforeNodeIds: stopSet,
             }),
           ),
@@ -501,6 +194,33 @@ export async function runWorkflow(input: {
         continue
       }
 
+      if (node.type === 'logic.try') {
+        const tryBodyStarts = def.edges.filter((e) => e.source === node.id && e.sourceHandle !== 'catch').map((e) => e.target)
+        const catchEdges = def.edges.filter((e) => e.source === node.id && e.sourceHandle === 'catch')
+        const tryCtx: RunContext = { trigger: { ...ctx.trigger }, steps: { ...ctx.steps }, vars: { ...ctx.vars }, loopIndex: 0, loopItem: null }
+        const sub = await runSubgraph({
+          tenantId: input.tenantId,
+          executionId: execution.id,
+          def,
+          startIds: tryBodyStarts,
+          ctx: tryCtx,
+        })
+        if (sub.failed) {
+          ctx.vars.__try_error = sub.error
+          for (const nextId of catchEdges.map((e) => e.target)) {
+            if (!visited.has(nextId)) queue.push(nextId)
+          }
+        } else {
+          ctx.steps = { ...ctx.steps, ...tryCtx.steps }
+          ctx.vars = { ...ctx.vars, ...tryCtx.vars }
+          const afterEdges = def.edges.filter((e) => e.source === node.id && !e.sourceHandle)
+          for (const nextId of afterEdges.map((e) => e.target)) {
+            if (!visited.has(nextId)) queue.push(nextId)
+          }
+        }
+        continue
+      }
+
       for (const nextId of nextNodeIds(node, output, def.edges)) {
         if (!visited.has(nextId)) queue.push(nextId)
       }
@@ -512,7 +232,7 @@ export async function runWorkflow(input: {
   }
 
   await db.finishExecution(execution.id, failed ? 'failed' : 'success', failed ? lastError : null)
-  return { executionId: execution.id, status: failed ? 'failed' : 'success' }
+  return { executionId: execution.id, status: failed ? 'success' : 'failed' }
 }
 
 export function workflowHasTrigger(def: WorkflowDefinition, triggerType: string): boolean {
@@ -540,6 +260,8 @@ export async function triggerMatchingWorkflows(
   }
   return jobIds
 }
+
+injectRunWorkflow(() => runWorkflow)
 
 export async function syncWorkflowTriggers(
   tenantId: string,
@@ -574,5 +296,3 @@ export async function syncWorkflowTriggers(
     }
   }
 }
-
-export { createEmbedding }

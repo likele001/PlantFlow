@@ -23,7 +23,7 @@ ENV PORT=5000
 
 # prod-only deps (lock may not match; use install for resilience)
 COPY package.json package-lock.json* ./
-RUN npm install --omit=dev --no-audit --no-fund
+RUN npm install --omit=dev --no-bin-links --no-audit --no-fund
 
 COPY --from=api-build  /app/dist-api ./dist-api
 COPY --from=web-build  /app/dist      ./dist

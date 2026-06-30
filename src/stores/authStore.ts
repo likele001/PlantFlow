@@ -21,6 +21,7 @@ type AuthState = {
   login: (email: string, password: string) => Promise<boolean>
   logout: () => Promise<void>
   hydrate: () => void
+  setAuth: (token: string, user: AuthUser, tenant: AuthTenant | null) => void
 }
 
 type LoginResponse = {
@@ -84,5 +85,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
     persist({ token: null, user: null, tenant: null })
     set({ token: null, user: null, tenant: null, isLoading: false })
+  },
+  setAuth: (token, user, tenant) => {
+    persist({ token, user, tenant })
+    set({ token, user, tenant, isLoading: false, error: null })
   },
 }))

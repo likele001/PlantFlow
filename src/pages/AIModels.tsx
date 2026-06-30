@@ -12,6 +12,7 @@ type Provider = {
   defaultChatModel: string
   defaultEmbeddingModel: string | null
   isDefault: boolean
+  isDefaultEmbedding: boolean
   createdAt: string
   updatedAt: string
 }
@@ -200,6 +201,12 @@ export default function AIModels() {
     else alert(r.error)
   }
 
+  async function setDefaultEmbedding(p: Provider) {
+    const r = await apiRequest(`/api/ai/providers/${p.id}/default-embedding`, { method: 'POST', token })
+    if (r.success) refresh()
+    else alert(r.error)
+  }
+
   async function remove(p: Provider) {
     if (!confirm(`确认删除「${p.name}」？`)) return
     const r = await apiRequest(`/api/ai/providers/${p.id}`, { method: 'DELETE', token })
@@ -264,7 +271,12 @@ export default function AIModels() {
                     <div className="truncate text-sm font-semibold">{p.name}</div>
                     {p.isDefault && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                        <Star className="h-3 w-3" /> 默认
+                        <Star className="h-3 w-3" /> Chat默认
+                      </span>
+                    )}
+                    {p.isDefaultEmbedding && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-medium text-violet-700 dark:bg-violet-900/40 dark:text-violet-300">
+                        向量默认
                       </span>
                     )}
                   </div>
@@ -315,7 +327,15 @@ export default function AIModels() {
                       onClick={() => setDefault(p)}
                       className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900"
                     >
-                      <StarOff className="h-3.5 w-3.5" /> 设为默认
+                      <StarOff className="h-3.5 w-3.5" /> Chat默认
+                    </button>
+                  )}
+                  {p.defaultEmbeddingModel && !p.isDefaultEmbedding && (
+                    <button
+                      onClick={() => setDefaultEmbedding(p)}
+                      className="inline-flex items-center gap-1 rounded-lg border border-violet-200 px-2.5 py-1.5 text-xs text-violet-600 hover:bg-violet-50 dark:border-violet-900/50 dark:hover:bg-violet-950/30"
+                    >
+                      向量默认
                     </button>
                   )}
                   <button
@@ -369,6 +389,7 @@ function ProviderForm(props: {
   const [chatModel, setChatModel] = useState(props.provider?.defaultChatModel ?? 'gpt-4o-mini')
   const [embedModel, setEmbedModel] = useState(props.provider?.defaultEmbeddingModel ?? '')
   const [isDefault, setIsDefault] = useState(props.provider?.isDefault ?? false)
+  const [isDefaultEmbedding, setIsDefaultEmbedding] = useState(props.provider?.isDefaultEmbedding ?? false)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
 
@@ -386,6 +407,7 @@ function ProviderForm(props: {
           defaultChatModel: chatModel,
           defaultEmbeddingModel: embedModel || null,
           isDefault,
+          isDefaultEmbedding,
         },
       })
       setSaving(false)
@@ -399,6 +421,7 @@ function ProviderForm(props: {
         defaultEmbeddingModel: embedModel || null,
       }
       if (apiKey) body.apiKey = apiKey
+      body.isDefaultEmbedding = isDefaultEmbedding
       const r = await apiRequest(`/api/ai/providers/${props.provider!.id}`, {
         method: 'PATCH',
         token,
@@ -510,7 +533,11 @@ function ProviderForm(props: {
         />
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} />
-          设为该租户的默认供应商
+          设为 Chat 默认供应商
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={isDefaultEmbedding} onChange={(e) => setIsDefaultEmbedding(e.target.checked)} />
+          设为 Embedding 默认供应商（向量化/检索专用）
         </label>
         {err && <div className="text-sm text-red-600">{err}</div>}
         <div className="flex justify-end gap-2 pt-2">

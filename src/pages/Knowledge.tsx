@@ -36,7 +36,7 @@ export default function Knowledge() {
   const [docTitle, setDocTitle] = useState('')
   const [docContent, setDocContent] = useState('')
   const [searchQ, setSearchQ] = useState('')
-  const [searchMode, setSearchMode] = useState<'keyword' | 'vector'>('vector')
+  const [searchMode, setSearchMode] = useState<'keyword' | 'vector' | 'hybrid'>('hybrid')
   const [hits, setHits] = useState<SearchHit[]>([])
   const [err, setErr] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
@@ -44,7 +44,9 @@ export default function Knowledge() {
   const [dragOver, setDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const ACCEPT_EXT = ['.txt', '.md', '.markdown', '.csv', '.json', '.html', '.htm', '.log', '.xml']
+  const TEXT_EXT = ['.txt', '.md', '.markdown', '.csv', '.json', '.html', '.htm', '.log', '.xml']
+  const BINARY_EXT = ['.pdf', '.docx']
+  const ACCEPT_EXT = [...TEXT_EXT, ...BINARY_EXT]
   const MAX_FILE_BYTES = 5 * 1024 * 1024
 
   const reloadDocs = useCallback(async () => {
@@ -96,8 +98,8 @@ export default function Knowledge() {
       token,
       body: { title: title.trim(), content: content.trim() },
     })
-    if (!res.success) {
-      setErr(res.error || '导入失败')
+    if (!('data' in res)) {
+      setErr('error' in res ? (res as { error: string }).error : '导入失败')
       return false
     }
     return true
@@ -127,6 +129,29 @@ export default function Knowledge() {
   function isAcceptedFile(file: File) {
     const lower = file.name.toLowerCase()
     return ACCEPT_EXT.some((ext) => lower.endsWith(ext))
+  }
+
+  function isBinaryFile(file: File) {
+    const lower = file.name.toLowerCase()
+    return BINARY_EXT.some((ext) => lower.endsWith(ext))
+  }
+
+  async function uploadBinaryFile(file: File): Promise<string> {
+    if (!token || !activeId) throw new Error('未选择知识库')
+    const form = new FormData()
+    form.append('file', file)
+    const endpoint = `/api/knowledge/bases/${activeId}/upload`
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    })
+    const data = (await res.json().catch(() => null)) as { success?: boolean; data?: { title?: string; content: string } } | null
+    if (!res.ok || !data?.success) {
+      const msg = (data as { error?: string } | null)?.error ?? res.statusText
+      throw new Error(msg)
+    }
+    return String(data.data?.content ?? '')
   }
 
   async function readFileText(file: File): Promise<string> {
@@ -162,13 +187,24 @@ export default function Knowledge() {
         continue
       }
       try {
-        const text = (await readFileText(file)).trim()
-        if (!text) {
-          skipped.push(`${file.name}（内容为空）`)
-          continue
+        let text: string
+        if (isBinaryFile(file)) {
+          const doc = await uploadBinaryFile(file)
+          text = doc
+          if (!text.trim()) {
+            skipped.push(`${file.name}（内容为空）`)
+            continue
+          }
+          ok += 1
+        } else {
+          text = (await readFileText(file)).trim()
+          if (!text) {
+            skipped.push(`${file.name}（内容为空）`)
+            continue
+          }
+          const success = await importDocument(fileTitle(file.name), text)
+          if (success) ok += 1
         }
-        const success = await importDocument(fileTitle(file.name), text)
-        if (success) ok += 1
       } catch (e) {
         skipped.push(`${file.name}（${e instanceof Error ? e.message : '读取失败'}）`)
       }
@@ -354,9 +390,9 @@ export default function Knowledge() {
               ) : null}
 
               <div className="rounded-2xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
-                <div className="text-sm font-semibold">检索评测</div>
+                 <div className="text-sm font-semibold">检索评测</div>
                 <div className="mt-1 text-xs text-zinc-500">
-                  <strong>向量</strong>：按语义相似度找相关内容（需先向量化）；<strong>关键词</strong>：按字面匹配，无需 Embedding。
+                  <strong>混合</strong>：向量+关键词融合排序（推荐）；<strong>向量</strong>：按语义相似度；<strong>关键词</strong>：按字面匹配。
                 </div>
                 <div className="mt-3 flex gap-2">
                   <input
@@ -367,9 +403,10 @@ export default function Knowledge() {
                   />
                   <select
                     value={searchMode}
-                    onChange={(e) => setSearchMode(e.target.value as 'keyword' | 'vector')}
+                    onChange={(e) => setSearchMode(e.target.value as 'keyword' | 'vector' | 'hybrid')}
                     className="h-10 rounded-xl border px-2 text-sm dark:border-zinc-800 dark:bg-zinc-950"
                   >
+                    <option value="hybrid">混合</option>
                     <option value="vector">向量</option>
                     <option value="keyword">关键词</option>
                   </select>

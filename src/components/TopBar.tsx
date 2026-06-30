@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { LogOut, Moon, Sun, Workflow } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useAuthStore } from '@/stores/authStore'
@@ -41,12 +42,15 @@ export default function TopBar(props: { className?: string }) {
           <span className="hidden sm:inline">{isDark ? '浅色' : '深色'}</span>
         </button>
 
-        <div className="hidden items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 sm:flex">
+        <Link
+          to="/profile"
+          className="hidden items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900 sm:flex"
+        >
           <div className="flex h-6 w-6 items-center justify-center rounded-md bg-zinc-100 text-xs font-semibold text-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
             {initials}
           </div>
           <div className="max-w-40 truncate">{user?.email ?? '未登录'}</div>
-        </div>
+        </Link>
 
         <button
           type="button"

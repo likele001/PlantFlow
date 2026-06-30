@@ -2,8 +2,11 @@ import { Router, type Response } from 'express'
 import { db } from '../store.js'
 import { createEmbedding } from '../engine/llm.js'
 import type { AuthedRequest } from '../middleware/auth.js'
+import multer from 'multer'
+import fs from 'node:fs'
 
 const router = Router()
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
 
 async function embedDocumentChunks(tenantId: string, documentId: string) {
   const chunks = await db.listChunksWithoutEmbedding(tenantId, documentId)
@@ -11,6 +14,21 @@ async function embedDocumentChunks(tenantId: string, documentId: string) {
     const vec = await createEmbedding(tenantId, ch.content)
     await db.setChunkEmbedding(ch.id, vec)
   }
+}
+
+async function parseFile(file: Express.Multer.File): Promise<string> {
+  const ext = file.originalname.toLowerCase().split('.').pop() ?? ''
+  if (['pdf'].includes(ext)) {
+    const { PDFParse } = await import('pdf-parse')
+    const data = await (PDFParse as unknown as (buf: Buffer) => Promise<{ text: string }>)(file.buffer)
+    return data.text
+  }
+  if (['docx'].includes(ext)) {
+    const mammoth = await import('mammoth')
+    const result = await mammoth.extractRawText({ buffer: file.buffer })
+    return result.value
+  }
+  return file.buffer.toString('utf-8')
 }
 
 router.get('/bases', async (req: AuthedRequest, res: Response) => {
@@ -80,6 +98,37 @@ router.post('/bases/:id/documents', async (req: AuthedRequest, res: Response) =>
   res.status(201).json({ success: true, data: doc })
 })
 
+router.post('/bases/:id/upload', upload.single('file'), async (req: AuthedRequest, res: Response) => {
+  try {
+    const tenantId = req.auth!.tenantId
+    const kbaseId = req.params.id
+    const kb = await db.findKnowledgeBase(tenantId, kbaseId)
+    if (!kb) {
+      res.status(404).json({ success: false, error: '知识库不存在' })
+      return
+    }
+    const file = (req as unknown as { file?: Express.Multer.File }).file
+    if (!file) {
+      res.status(400).json({ success: false, error: '未上传文件' })
+      return
+    }
+    const title = file.originalname
+    const text = await parseFile(file)
+    if (!text?.trim()) {
+      res.status(400).json({ success: false, error: '文件内容为空或无法解析' })
+      return
+    }
+
+    const doc = await db.addKnowledgeDocument(tenantId, kbaseId, title, text, 'file')
+    void embedDocumentChunks(tenantId, doc.id).catch((e) =>
+      console.error('[knowledge] embed failed', e),
+    )
+    res.status(201).json({ success: true, data: doc })
+  } catch (e: unknown) {
+    res.status(500).json({ success: false, error: e instanceof Error ? e.message : '文件解析失败' })
+  }
+})
+
 router.post('/bases/:id/search', async (req: AuthedRequest, res: Response) => {
   const tenantId = req.auth!.tenantId
   const { query, limit, mode } = (req.body ?? {}) as { query?: string; limit?: number; mode?: string }
@@ -89,6 +138,7 @@ router.post('/bases/:id/search', async (req: AuthedRequest, res: Response) => {
     return
   }
   const lim = limit ?? 5
+
   if (mode === 'vector') {
     const vectorized = await db.countVectorizedChunks(tenantId, req.params.id)
     if (vectorized === 0) {
@@ -97,7 +147,7 @@ router.post('/bases/:id/search', async (req: AuthedRequest, res: Response) => {
         data: [],
         mode: 'vector',
         warning:
-          '文档尚未向量化。请先在「AI 模型」配置 Embedding 模型，再对文档点「重向量化」。临时可用「关键词」检索。',
+          '文档尚未向量化。请先在「AI 模型」配置 Embedding 模型，再对文档点「重向量化」。临时可用「关键词」或「混合」检索。',
       })
       return
     }
@@ -114,6 +164,22 @@ router.post('/bases/:id/search', async (req: AuthedRequest, res: Response) => {
     }
     return
   }
+
+  if (mode === 'hybrid') {
+    try {
+      const hits = await db.searchKnowledgeChunksHybrid(tenantId, req.params.id, q, lim)
+      res.json({ success: true, data: hits, mode: 'hybrid' })
+    } catch (e) {
+      res.json({
+        success: true,
+        data: [],
+        mode: 'hybrid',
+        warning: e instanceof Error ? e.message : '混合检索失败，请尝试关键词检索',
+      })
+    }
+    return
+  }
+
   const hits = await db.searchKnowledgeChunks(tenantId, req.params.id, q, lim)
   res.json({ success: true, data: hits, mode: 'keyword' })
 })
